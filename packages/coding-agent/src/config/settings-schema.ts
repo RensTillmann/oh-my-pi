@@ -606,6 +606,14 @@ export const SETTINGS_SCHEMA = {
 			description: "Launch browser in headless mode (disable to show browser UI)",
 		},
 	},
+	"browser.screenshotDir": {
+		type: "string",
+		ui: {
+			tab: "tools",
+			label: "Screenshot directory",
+			description: "Persist screenshots to this directory (in addition to /tmp). Unset = temp only. Examples: ~/Downloads, ~/Desktop, /sdcard/Download (Android)",
+		},
+	},
 	"tools.intentTracing": {
 		type: "boolean",
 		default: true,
