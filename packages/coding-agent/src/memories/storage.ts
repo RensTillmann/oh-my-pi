@@ -476,7 +476,10 @@ WHERE kind = ? AND job_key = ? AND status = 'running' AND ownership_token = ?
 	return Number(result.changes ?? 0) > 0;
 }
 
-export function listStage1OutputsForGlobal(db: Database, limit: number): Stage1OutputRow[] {
+// Filter by cwd so each project only consolidates its own thread outputs.
+// Before this filter existed, whichever project ran Phase 2 first got every
+// project's data written into its memory directory (see #369).
+export function listStage1OutputsForGlobal(db: Database, limit: number, cwd: string): Stage1OutputRow[] {
 	const rows = db
 		.prepare(`
 SELECT o.thread_id, o.source_updated_at, o.raw_memory, o.rollout_summary, o.rollout_slug, o.generated_at, t.cwd
