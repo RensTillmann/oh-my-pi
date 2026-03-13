@@ -611,7 +611,7 @@ export const SETTINGS_SCHEMA = {
 		ui: {
 			tab: "tools",
 			label: "Screenshot directory",
-			description: "Default directory for saving screenshots (e.g. /sdcard/Download)",
+			description: "Persist screenshots to this directory (in addition to /tmp). Unset = temp only. Examples: ~/Downloads, ~/Desktop, /sdcard/Download (Android)",
 		},
 	},
 	"tools.intentTracing": {
