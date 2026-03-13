@@ -1357,6 +1357,28 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 					const tempFile = path.join(os.tmpdir(), `omp-sshots-${Snowflake.next()}.png`);
 					await Bun.write(tempFile, resized.buffer);
 					details.screenshotPath = tempFile;
+					// Persist to user-defined location if configured.
+					// Expand leading '~' to the home directory for both screenshotDir and params.path.
+					const expandHome = (p: string) => p.startsWith("~/") || p === "~" ? path.join(os.homedir(), p.slice(1)) : p;
+					const screenshotDir = (() => {
+						const v = this.session.settings.get("browser.screenshotDir") as string | undefined;
+						return v ? expandHome(v) : undefined;
+					})();
+					const paramPath = params.path ? expandHome(params.path as string) : undefined;
+					if (paramPath || screenshotDir) {
+						let dest: string;
+						if (paramPath) {
+							dest = path.isAbsolute(paramPath)
+								? paramPath
+								: path.join(screenshotDir ?? process.cwd(), paramPath);
+						} else {
+							const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
+							dest = path.join(screenshotDir!, `screenshot-${ts}.png`);
+						}
+						await fs.mkdir(path.dirname(dest), { recursive: true });
+						await Bun.write(dest, buffer);
+						details.screenshotPath = dest;
+					}
 					details.mimeType = resized.mimeType;
 					details.bytes = resized.buffer.length;
 
