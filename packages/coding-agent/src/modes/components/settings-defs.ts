@@ -51,7 +51,11 @@ export interface SubmenuSettingDef extends BaseSettingDef {
 	onPreviewCancel?: (originalValue: string) => void;
 }
 
-export type SettingDef = BooleanSettingDef | EnumSettingDef | SubmenuSettingDef;
+export interface TextInputSettingDef extends BaseSettingDef {
+	type: "text";
+}
+
+export type SettingDef = BooleanSettingDef | EnumSettingDef | SubmenuSettingDef | TextInputSettingDef;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Condition Functions
@@ -236,7 +240,6 @@ const OPTION_PROVIDERS: Partial<Record<SettingPath, OptionProvider>> = {
 		{ value: "tavily", label: "Tavily", description: "Requires TAVILY_API_KEY" },
 		{ value: "kagi", label: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access" },
 		{ value: "synthetic", label: "Synthetic", description: "Requires SYNTHETIC_API_KEY" },
-		{ value: "parallel", label: "Parallel", description: "Requires PARALLEL_API_KEY" },
 	],
 	"providers.image": [
 		{ value: "auto", label: "Auto", description: "Priority: OpenRouter > Gemini" },
@@ -398,6 +401,11 @@ function pathToSettingDef(path: SettingPath): SettingDef | null {
 		}
 		// For theme etc, options will be injected at runtime
 		return createSubmenuSettingDef(base, []);
+	}
+
+	// Plain string setting — free-text input field
+	if (schemaType === "string") {
+		return { ...base, type: "text" };
 	}
 
 	return null;
