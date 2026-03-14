@@ -100,6 +100,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[], pr
 				disabledReason,
 				disableScope,
 				shadowedBy: opts?.getShadowedBy?.(item),
+				isGlobalDisabled: isDisabled,
+				isProjectDisabled: isProjectDisabled,
 				raw: item,
 			});
 		}
@@ -192,6 +194,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[], pr
 				state,
 				disabledReason,
 				disableScope,
+				isGlobalDisabled: isDisabled,
+				isProjectDisabled: isProjectDisabled,
 				raw: server,
 			});
 		}
@@ -265,6 +269,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[], pr
 				state,
 				disabledReason,
 				disableScope,
+				isGlobalDisabled: isDisabled,
+				isProjectDisabled: isProjectDisabled,
 				raw: hook,
 			});
 		}
@@ -318,6 +324,8 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[], pr
 				state,
 				disabledReason,
 				disableScope,
+				isGlobalDisabled: isDisabled,
+				isProjectDisabled: isProjectDisabled,
 				raw: file,
 			});
 		}
