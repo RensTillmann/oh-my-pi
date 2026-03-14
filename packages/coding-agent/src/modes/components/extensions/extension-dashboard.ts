@@ -197,18 +197,43 @@ export class ExtensionDashboard extends Container {
 	}
 
 	/**
-	 * Smart toggle: inspect the extension's current disable scope and
-	 * route to the correct handler. Disabling always targets project scope;
-	 * re-enabling targets whichever scope disabled the item.
+	 * Three-state cycle on Space: Disabled globally → Active → Disabled for project → repeat.
+	 * When both scopes are disabled, treats as "globally disabled" and cycles to Active.
 	 */
-	#handleSmartToggle(ext: Extension, enabled: boolean): void {
-		if (enabled && ext.disabledReason === "item-disabled") {
-			// Re-enable a globally disabled item → must remove from global list
-			this.#handleGlobalExtensionToggle(ext.id, true);
+	#handleSmartToggle(ext: Extension, _enabled: boolean): void {
+		const sm = this.settings ?? Settings.instance;
+		if (!sm) return;
+
+		const globalDisabled = ((sm.get("disabledExtensions") as string[]) ?? []).slice();
+		const projectDisabled = ((sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? []).slice();
+
+		if (ext.isGlobalDisabled) {
+			// Disabled globally → Active (clear both scopes)
+			const gi = globalDisabled.indexOf(ext.id);
+			if (gi !== -1) globalDisabled.splice(gi, 1);
+			const pi = projectDisabled.indexOf(ext.id);
+			if (pi !== -1) projectDisabled.splice(pi, 1);
+		} else if (!ext.isProjectDisabled) {
+			// Active → Disabled for this project
+			if (!projectDisabled.includes(ext.id)) {
+				projectDisabled.push(ext.id);
+			}
 		} else {
-			// Disable (always project-scoped) or re-enable a project-disabled item
-			this.#handleProjectExtensionToggle(ext.id, enabled);
+			// Disabled for project → Disabled globally (swap scopes)
+			const pi = projectDisabled.indexOf(ext.id);
+			if (pi !== -1) projectDisabled.splice(pi, 1);
+			if (!globalDisabled.includes(ext.id)) {
+				globalDisabled.push(ext.id);
+			}
 		}
+
+		sm.set("disabledExtensions", globalDisabled);
+		sm.setProject("projectDisabledExtensions", projectDisabled);
+		setDisabledExtensions(
+			(sm.get("disabledExtensions") as string[]) ?? [],
+			(sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? [],
+		);
+		void this.#refreshFromState();
 	}
 
 
