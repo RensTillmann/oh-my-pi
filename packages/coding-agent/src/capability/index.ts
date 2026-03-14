@@ -39,6 +39,12 @@ const providerMeta = new Map<string, { displayName: string; description: string 
 /** Disabled providers (by ID) */
 const disabledProviders = new Set<string>();
 
+/** Disabled extensions (by ID, e.g. "skill:brainstorming") */
+const disabledExtensions = new Set<string>();
+
+/** Project-scoped disabled extensions (by ID) */
+const projectDisabledExtensions = new Set<string>();
+
 /** Settings manager for persistence (if set) */
 let settings: Settings | null = null;
 
@@ -254,6 +260,10 @@ export function initializeWithSettings(activeSettings: Settings): void {
 	for (const id of disabled) {
 		disabledProviders.add(id);
 	}
+	// Load disabled extensions from settings
+	const globalDisabled = (settings.get("disabledExtensions") as string[]) ?? [];
+	const projectDisabled = (settings.getProject("projectDisabledExtensions") as string[] | undefined) ?? [];
+	setDisabledExtensions(globalDisabled, projectDisabled);
 }
 
 /**
@@ -304,6 +314,24 @@ export function setDisabledProviders(providerIds: string[]): void {
 		disabledProviders.add(id);
 	}
 	persistDisabledProviders();
+}
+
+/**
+ * Check if an extension is disabled (globally or project-scoped).
+ */
+export function isExtensionDisabled(extensionId: string): boolean {
+	return disabledExtensions.has(extensionId) || projectDisabledExtensions.has(extensionId);
+}
+
+/**
+ * Set disabled extensions from settings.
+ * Called at startup and when dashboard toggles change.
+ */
+export function setDisabledExtensions(globalIds: string[], projectIds: string[]): void {
+	disabledExtensions.clear();
+	for (const id of globalIds) disabledExtensions.add(id);
+	projectDisabledExtensions.clear();
+	for (const id of projectIds) projectDisabledExtensions.add(id);
 }
 
 // =============================================================================

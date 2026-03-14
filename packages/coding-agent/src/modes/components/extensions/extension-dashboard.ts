@@ -28,6 +28,7 @@ import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import type { DashboardState, Extension } from "./types";
+import { setDisabledExtensions } from "../../../capability";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -184,6 +185,10 @@ export class ExtensionDashboard extends Container {
 			}
 		}
 
+		setDisabledExtensions(
+			(sm.get("disabledExtensions") as string[]) ?? [],
+			(sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? [],
+		);
 		void this.#refreshFromState();
 	}
 
@@ -221,6 +226,10 @@ export class ExtensionDashboard extends Container {
 			}
 		}
 
+		setDisabledExtensions(
+			(sm.get("disabledExtensions") as string[]) ?? [],
+			(sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? [],
+		);
 		void this.#refreshFromState();
 	}
 

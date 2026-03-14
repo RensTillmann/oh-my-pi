@@ -1,5 +1,6 @@
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { slashCommandCapability } from "../capability/slash-command";
+import { isExtensionDisabled } from "../capability";
 import {
 	appendInlineArgsFallback,
 	renderPromptTemplate,
@@ -166,7 +167,9 @@ export interface LoadSlashCommandsOptions {
 export async function loadSlashCommands(options: LoadSlashCommandsOptions = {}): Promise<FileSlashCommand[]> {
 	const result = await loadCapability<SlashCommand>(slashCommandCapability.id, { cwd: options.cwd });
 
-	const fileCommands: FileSlashCommand[] = result.items.map(cmd => {
+	const fileCommands: FileSlashCommand[] = result.items
+		.filter(cmd => !isExtensionDisabled(`slash-command:${cmd.name}`))
+		.map(cmd => {
 		const { description, body } = parseCommandTemplate(cmd.content, {
 			source: cmd.path ?? `slash-command:${cmd.name}`,
 			level: cmd.level === "native" ? "fatal" : "warn",
