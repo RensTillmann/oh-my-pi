@@ -11,6 +11,7 @@
  * - Space: Toggle selected item (or master switch)
  * - Esc: Close dashboard (clears search first if active)
  */
+import * as os from "node:os";
 import {
 	type Component,
 	Container,
@@ -29,7 +30,7 @@ import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import type { DashboardState, Extension } from "./types";
 import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
-import { deleteExtension, type ActionResult, type MoveTarget } from "./extension-actions";
+import { deleteExtension, getMoveTargets, moveExtension, type ActionResult, type MoveTarget } from "./extension-actions";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -438,6 +439,21 @@ export class ExtensionDashboard extends Container {
 			case "delete":
 				result = await deleteExtension(this.#actionMode.ext);
 				break;
+			case "move": {
+				const mode = this.#actionMode as { type: "picker"; options: MoveTarget[]; selectedIndex: number; ext: Extension };
+				const selected = mode.options[mode.selectedIndex];
+				if (selected && selected.targetDir) {
+					result = await moveExtension(mode.ext, selected.targetDir);
+				}
+				break;
+			}
+			case "custom-path": {
+				const mode = this.#actionMode as { type: "input"; ext: Extension; buffer: string };
+				if (mode.buffer) {
+					result = await moveExtension(mode.ext, mode.buffer);
+				}
+				break;
+			}
 		}
 
 		this.#actionMode = null;
@@ -534,6 +550,27 @@ export class ExtensionDashboard extends Container {
 			}
 			return;
 		}
+
+		// M: Move/relocate extension
+		if (data === "m" || data === "M") {
+			const ext = this.#mainList.getSelectedExtension();
+			if (ext && ext.source.level !== "native") {
+				const targets = getMoveTargets(ext, this.cwd, os.homedir());
+				if (targets.length > 0) {
+					// Add "Custom path..." sentinel
+					const options: MoveTarget[] = [
+						...targets,
+						{ label: "Custom path...", provider: "", scope: "project", targetDir: "" },
+					];
+					this.#actionMode = {
+						type: "picker", action: "move", ext, options, selectedIndex: 0,
+					};
+					this.#buildLayout();
+				}
+			}
+			return;
+		}
+
 
 		// E: Open in editor
 		if (data === "e" || data === "E") {
