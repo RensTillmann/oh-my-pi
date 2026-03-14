@@ -36,6 +36,7 @@ export class ExtensionDashboard extends Container {
 	#inspector!: InspectorPanel;
 
 	onClose?: () => void;
+	onRequestRender?: () => void;
 
 	private constructor(
 		private readonly cwd: string,
@@ -261,6 +262,7 @@ export class ExtensionDashboard extends Container {
 		}
 
 		this.#buildLayout();
+		this.onRequestRender?.();
 	}
 
 	#switchTab(direction: 1 | -1): void {
