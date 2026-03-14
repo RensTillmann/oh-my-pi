@@ -16,13 +16,15 @@ import {
 import { isProviderEnabled } from "../../../discovery";
 import { theme } from "../../../modes/theme/theme";
 import { applyFilter } from "./state-manager";
-import type { Extension, ExtensionKind, ExtensionState } from "./types";
+import type { DisabledReason, Extension, ExtensionKind, ExtensionState } from "./types";
 
 export interface ExtensionListCallbacks {
 	/** Called when selection changes */
 	onSelectionChange?: (extension: Extension | null) => void;
 	/** Called when extension is toggled */
 	onToggle?: (extensionId: string, enabled: boolean) => void;
+	/** Called when extension is globally toggled (g key) */
+	onGlobalToggle?: (extensionId: string, enabled: boolean) => void;
 	/** Called when master switch is toggled */
 	onMasterToggle?: (providerId: string) => void;
 	/** Provider ID for master switch (null = no master switch) */
@@ -199,10 +201,13 @@ export class ExtensionList implements Component {
 
 		// Name
 		let name = ext.displayName;
-		const nameWidth = Math.min(24, width - 16);
+		const nameWidth = Math.min(24, width - 20);
 
-		// Build the line with indentation (visually "inside" the master switch)
-		let line = `   ${stateIcon} `;
+		// Origin badge: [G] for user-level (global), [L] for project-level (local)
+		const originBadge = ext.source.level === "project" ? theme.fg("muted", "[L]") : theme.fg("muted", "[G]");
+
+		// Build the line with indentation
+		let line = `   ${stateIcon} ${originBadge} `;
 
 		if (isSelected && !masterDisabled) {
 			name = theme.bold(theme.fg("accent", name));
@@ -216,8 +221,12 @@ export class ExtensionList implements Component {
 		const namePadded = this.#padText(name, nameWidth);
 		line += namePadded;
 
-		// Trigger hint
-		if (ext.trigger) {
+		// Disable scope suffix for disabled items
+		const scopeSuffix = this.#getScopeSuffix(ext.disabledReason);
+		if (scopeSuffix) {
+			line += ` ${theme.fg("dim", scopeSuffix)}`;
+		} else if (ext.trigger) {
+			// Trigger hint (only when no scope suffix)
 			const triggerStyle = effectivelyDisabled ? "dim" : "muted";
 			const remainingWidth = width - visibleWidth(line) - 2;
 			if (remainingWidth > 5) {
@@ -271,6 +280,21 @@ export class ExtensionList implements Component {
 				return theme.fg("dim", theme.status.disabled);
 			case "shadowed":
 				return theme.fg("warning", theme.status.shadowed);
+		}
+	}
+
+	#getScopeSuffix(reason: DisabledReason | undefined): string | null {
+		switch (reason) {
+			case "item-disabled-project":
+				return "(project)";
+			case "item-disabled":
+				return "(global)";
+			case "provider-disabled":
+				return "(provider)";
+			case "shadowed":
+				return "(shadowed)";
+			default:
+				return null;
 		}
 	}
 
@@ -422,6 +446,20 @@ export class ExtensionList implements Component {
 				if (!masterDisabled) {
 					const newEnabled = item.item.state === "disabled";
 					this.callbacks.onToggle?.(item.item.id, newEnabled);
+				}
+			}
+			return;
+		}
+
+		// g: Global toggle
+		if (data === "g" && this.#searchQuery.length === 0) {
+			const item = this.#listItems[this.#selectedIndex];
+			if (item?.type === "extension") {
+				const masterDisabled =
+					this.#masterSwitchProvider !== null && !isProviderEnabled(this.#masterSwitchProvider);
+				if (!masterDisabled) {
+					const newEnabled = item.item.state === "disabled";
+					this.callbacks.onGlobalToggle?.(item.item.id, newEnabled);
 				}
 			}
 			return;
