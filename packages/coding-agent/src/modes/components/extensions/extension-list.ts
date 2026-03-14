@@ -407,6 +407,30 @@ export class ExtensionList implements Component {
 		}
 	}
 
+	jumpToNextCategory(): boolean {
+		for (let i = this.#selectedIndex + 1; i < this.#listItems.length; i++) {
+			if (this.#listItems[i].type === "kind-header") {
+				this.#selectedIndex = i;
+				this.#clampSelection();
+				this.#notifySelectionChange();
+				return true;
+			}
+		}
+		return false;
+	}
+
+	jumpToPrevCategory(): boolean {
+		for (let i = this.#selectedIndex - 1; i >= 0; i--) {
+			if (this.#listItems[i].type === "kind-header") {
+				this.#selectedIndex = i;
+				this.#clampSelection();
+				this.#notifySelectionChange();
+				return true;
+			}
+		}
+		return false;
+	}
+
 	handleInput(data: string): void {
 		// Navigation: Up
 		if (matchesKey(data, "up") || data === "k") {
