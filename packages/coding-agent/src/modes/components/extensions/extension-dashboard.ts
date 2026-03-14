@@ -120,7 +120,7 @@ export class ExtensionDashboard extends Container {
 		this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", " ↑/↓: navigate  Space: project toggle  g: global toggle  Tab: provider  Esc: close"), 0, 0));
+		this.addChild(new Text(theme.fg("dim", " \u2191/\u2193: navigate  Space: project toggle  ^G: global toggle  Tab: provider  Esc: close"), 0, 0));
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
