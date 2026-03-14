@@ -21,8 +21,8 @@ import type { DisabledReason, Extension, ExtensionKind, ExtensionState } from ".
 export interface ExtensionListCallbacks {
 	/** Called when selection changes */
 	onSelectionChange?: (extension: Extension | null) => void;
-	/** Called when extension is toggled */
-	onToggle?: (extensionId: string, enabled: boolean) => void;
+	/** Called when extension is toggled (Space — context-aware) */
+	onToggle?: (extension: Extension, enabled: boolean) => void;
 	/** Called when extension is globally toggled (g key) */
 	onGlobalToggle?: (extensionId: string, enabled: boolean) => void;
 	/** Called when master switch is toggled */
@@ -442,7 +442,7 @@ export class ExtensionList implements Component {
 					this.#masterSwitchProvider !== null && !isProviderEnabled(this.#masterSwitchProvider);
 				if (!masterDisabled) {
 					const newEnabled = item.item.state === "disabled";
-					this.callbacks.onToggle?.(item.item.id, newEnabled);
+					this.callbacks.onToggle?.(item.item, newEnabled);
 				}
 			}
 			return;
@@ -472,7 +472,7 @@ export class ExtensionList implements Component {
 					this.#masterSwitchProvider !== null && !isProviderEnabled(this.#masterSwitchProvider);
 				if (!masterDisabled) {
 					const newEnabled = item.item.state === "disabled";
-					this.callbacks.onToggle?.(item.item.id, newEnabled);
+					this.callbacks.onToggle?.(item.item, newEnabled);
 				}
 			}
 			return;
