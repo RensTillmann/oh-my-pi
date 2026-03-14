@@ -323,6 +323,7 @@ export const SETTINGS_SCHEMA = {
 	enabledModels: { type: "array", default: [] as string[] },
 	disabledProviders: { type: "array", default: [] as string[] },
 	disabledExtensions: { type: "array", default: [] as string[] },
+	projectDisabledExtensions: { type: "array", default: [] as string[] },
 	modelRoles: { type: "record", default: {} as Record<string, string> },
 	"contextPromotion.enabled": {
 		type: "boolean",

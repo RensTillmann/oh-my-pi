@@ -57,7 +57,8 @@ export class ExtensionDashboard extends Container {
 	async #init(): Promise<void> {
 		const sm = this.settings ?? (await Settings.init());
 		const disabledIds = sm ? ((sm.get("disabledExtensions") as string[]) ?? []) : [];
-		this.#state = await createInitialState(this.cwd, disabledIds);
+		const projectDisabledIds = sm ? ((sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? []) : [];
+		this.#state = await createInitialState(this.cwd, disabledIds, projectDisabledIds);
 
 		// Calculate max visible items based on terminal height
 		// Reserve ~10 lines for header, tabs, help text, borders
@@ -72,7 +73,10 @@ export class ExtensionDashboard extends Container {
 					this.#inspector.setExtension(ext);
 				},
 				onToggle: (extensionId, enabled) => {
-					this.#handleExtensionToggle(extensionId, enabled);
+					this.#handleProjectExtensionToggle(extensionId, enabled);
+				},
+				onGlobalToggle: (extensionId, enabled) => {
+					this.#handleGlobalExtensionToggle(extensionId, enabled);
 				},
 				onMasterToggle: providerId => {
 					this.#handleProviderToggle(providerId);
@@ -116,7 +120,7 @@ export class ExtensionDashboard extends Container {
 		this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", " ↑/↓: navigate  Space: toggle  Tab: next provider  Esc: close"), 0, 0));
+		this.addChild(new Text(theme.fg("dim", " ↑/↓: navigate  Space: project toggle  g: global toggle  Tab: provider  Esc: close"), 0, 0));
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
@@ -162,7 +166,7 @@ export class ExtensionDashboard extends Container {
 		void this.#refreshFromState();
 	}
 
-	#handleExtensionToggle(extensionId: string, enabled: boolean): void {
+	#handleGlobalExtensionToggle(extensionId: string, enabled: boolean): void {
 		const sm = this.settings ?? Settings.instance;
 		if (!sm) return;
 
@@ -183,13 +187,35 @@ export class ExtensionDashboard extends Container {
 		void this.#refreshFromState();
 	}
 
+	#handleProjectExtensionToggle(extensionId: string, enabled: boolean): void {
+		const sm = this.settings ?? Settings.instance;
+		if (!sm) return;
+
+		const disabled = ((sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? []).slice();
+		if (enabled) {
+			const index = disabled.indexOf(extensionId);
+			if (index !== -1) {
+				disabled.splice(index, 1);
+				sm.setProject("projectDisabledExtensions", disabled);
+			}
+		} else {
+			if (!disabled.includes(extensionId)) {
+				disabled.push(extensionId);
+				sm.setProject("projectDisabledExtensions", disabled);
+			}
+		}
+
+		void this.#refreshFromState();
+	}
+
 	async #refreshFromState(): Promise<void> {
 		// Remember current tab ID before refresh
 		const currentTabId = this.#state.tabs[this.#state.activeTabIndex]?.id;
 
 		const sm = this.settings ?? Settings.instance;
 		const disabledIds = sm ? ((sm.get("disabledExtensions") as string[]) ?? []) : [];
-		this.#state = await refreshState(this.#state, this.cwd, disabledIds);
+		const projectDisabledIds = sm ? ((sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? []) : [];
+		this.#state = await refreshState(this.#state, this.cwd, disabledIds, projectDisabledIds);
 
 		// Find the same tab in the new (re-sorted) list
 		if (currentTabId) {
