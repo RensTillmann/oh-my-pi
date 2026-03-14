@@ -34,6 +34,9 @@ export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
 	#mainList!: ExtensionList;
 	#inspector!: InspectorPanel;
+	#scrollStartTime = 0;
+	#lastScrollTime = 0;
+	#lastScrollDirection = 0;
 
 	onClose?: () => void;
 	onRequestRender?: () => void;
@@ -84,6 +87,9 @@ export class ExtensionDashboard extends Container {
 					this.#handleProviderToggle(providerId);
 				},
 				masterSwitchProvider: this.#getActiveProviderId(),
+				onCategoryToggle: (extensions) => {
+					this.#handleCategoryToggle(extensions);
+				},
 			},
 			maxVisible,
 		);
@@ -234,6 +240,31 @@ export class ExtensionDashboard extends Container {
 		void this.#refreshFromState();
 	}
 
+	#handleCategoryToggle(extensions: Extension[]): void {
+		const sm = this.settings ?? Settings.instance;
+		if (!sm) return;
+
+		const projectDisabled = ((sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? []).slice();
+
+		// If any eligible item is active, disable all for project; otherwise enable all
+		const anyActive = extensions.some(e => e.state === "active");
+		for (const ext of extensions) {
+			const idx = projectDisabled.indexOf(ext.id);
+			if (anyActive) {
+				if (idx === -1) projectDisabled.push(ext.id);
+			} else {
+				if (idx !== -1) projectDisabled.splice(idx, 1);
+			}
+		}
+
+		sm.setProject("projectDisabledExtensions", projectDisabled);
+		setDisabledExtensions(
+			(sm.get("disabledExtensions") as string[]) ?? [],
+			projectDisabled,
+		);
+		void this.#refreshFromState();
+	}
+
 	async #refreshFromState(): Promise<void> {
 		// Remember current tab ID before refresh
 		const currentTabId = this.#state.tabs[this.#state.activeTabIndex]?.id;
@@ -303,13 +334,13 @@ export class ExtensionDashboard extends Container {
 			return;
 		}
 
-		// Escape - clear search first, then close
+		// Escape - exit search mode, clear committed filter, or close
 		if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
-			if (this.#state.searchQuery.length > 0) {
+			if (this.#mainList.isSearchActive() || this.#state.searchQuery.length > 0) {
+				this.#mainList.deactivateSearch();
 				this.#state.searchQuery = "";
 				this.#state.searchFiltered = this.#state.tabFiltered;
 				this.#mainList.setExtensions(this.#state.searchFiltered);
-				this.#mainList.clearSearch();
 				this.#buildLayout();
 				return;
 			}
@@ -327,14 +358,17 @@ export class ExtensionDashboard extends Container {
 			return;
 		}
 
-		// PgUp/PgDn: Scroll inspector preview
-		if (matchesKey(data, "pageUp")) {
-			this.#inspector.scrollPreview(-10);
-			this.#buildLayout();
-			return;
-		}
-		if (matchesKey(data, "pageDown")) {
-			this.#inspector.scrollPreview(10);
+		// PgUp/PgDn: Scroll inspector preview (accelerates from 1–5 over 5s)
+		if (matchesKey(data, "pageUp") || matchesKey(data, "pageDown")) {
+			const direction = matchesKey(data, "pageUp") ? -1 : 1;
+			const now = Date.now();
+			if (now - this.#lastScrollTime > 300 || direction !== this.#lastScrollDirection) {
+				this.#scrollStartTime = now;
+			}
+			this.#lastScrollTime = now;
+			this.#lastScrollDirection = direction;
+			const speed = Math.min(5, 1 + Math.floor((now - this.#scrollStartTime) / 1000));
+			this.#inspector.scrollPreview(direction * speed);
 			this.#buildLayout();
 			return;
 		}
