@@ -45,6 +45,7 @@ export class ExtensionDashboard extends Container {
 		private readonly cwd: string,
 		private readonly settings: Settings | null,
 		private readonly terminalHeight: number,
+		private readonly mcpManager?: { getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined },
 	) {
 		super();
 	}
@@ -53,8 +54,9 @@ export class ExtensionDashboard extends Container {
 		cwd: string,
 		settings: Settings | null = null,
 		terminalHeight?: number,
+		mcpManager?: { getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined },
 	): Promise<ExtensionDashboard> {
-		const dashboard = new ExtensionDashboard(cwd, settings, terminalHeight ?? process.stdout.rows ?? 24);
+		const dashboard = new ExtensionDashboard(cwd, settings, terminalHeight ?? process.stdout.rows ?? 24, mcpManager);
 		await dashboard.#init();
 		return dashboard;
 	}
@@ -63,7 +65,7 @@ export class ExtensionDashboard extends Container {
 		const sm = this.settings ?? (await Settings.init());
 		const disabledIds = sm ? ((sm.get("disabledExtensions") as string[]) ?? []) : [];
 		const projectDisabledIds = sm ? ((sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? []) : [];
-		this.#state = await createInitialState(this.cwd, disabledIds, projectDisabledIds);
+		this.#state = await createInitialState(this.cwd, disabledIds, projectDisabledIds, this.mcpManager);
 
 		// Calculate max visible items based on terminal height
 		// Reserve ~10 lines for header, tabs, help text, borders
@@ -79,9 +81,6 @@ export class ExtensionDashboard extends Container {
 				},
 				onToggle: (ext, enabled) => {
 					this.#handleSmartToggle(ext, enabled);
-				},
-				onGlobalToggle: (extensionId, enabled) => {
-					this.#handleGlobalExtensionToggle(extensionId, enabled);
 				},
 				onMasterToggle: providerId => {
 					this.#handleProviderToggle(providerId);
@@ -175,30 +174,6 @@ export class ExtensionDashboard extends Container {
 		void this.#refreshFromState();
 	}
 
-	#handleGlobalExtensionToggle(extensionId: string, enabled: boolean): void {
-		const sm = this.settings ?? Settings.instance;
-		if (!sm) return;
-
-		const disabled = ((sm.get("disabledExtensions") as string[]) ?? []).slice();
-		if (enabled) {
-			const index = disabled.indexOf(extensionId);
-			if (index !== -1) {
-				disabled.splice(index, 1);
-				sm.set("disabledExtensions", disabled);
-			}
-		} else {
-			if (!disabled.includes(extensionId)) {
-				disabled.push(extensionId);
-				sm.set("disabledExtensions", disabled);
-			}
-		}
-
-		setDisabledExtensions(
-			(sm.get("disabledExtensions") as string[]) ?? [],
-			(sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? [],
-		);
-		void this.#refreshFromState();
-	}
 
 	/**
 	 * Three-state cycle on Space: Disabled globally → Active → Disabled for project → repeat.
@@ -272,7 +247,7 @@ export class ExtensionDashboard extends Container {
 		const sm = this.settings ?? Settings.instance;
 		const disabledIds = sm ? ((sm.get("disabledExtensions") as string[]) ?? []) : [];
 		const projectDisabledIds = sm ? ((sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? []) : [];
-		this.#state = await refreshState(this.#state, this.cwd, disabledIds, projectDisabledIds);
+		this.#state = await refreshState(this.#state, this.cwd, disabledIds, projectDisabledIds, this.mcpManager);
 
 		// Find the same tab in the new (re-sorted) list
 		if (currentTabId) {

@@ -124,6 +124,10 @@ export class InspectorPanel implements Component {
 			case "mcp":
 				content = this.#renderMcpDetails(ext.raw, width);
 				break;
+			case "slash-command":
+			case "prompt":
+				content = this.#renderCommandContent(ext.raw, width);
+				break;
 			default:
 				content = this.#renderDefaultPreview(ext, width);
 				break;
@@ -256,6 +260,32 @@ export class InspectorPanel implements Component {
 		return lines;
 	}
 
+	#renderCommandContent(raw: unknown, width: number): string[] {
+		const lines: string[] = [];
+		lines.push(theme.fg("muted", "Content:"));
+		lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
+
+		const content = raw && typeof raw === "object" && "content" in raw
+			? (raw as { content?: string }).content
+			: undefined;
+
+		if (!content) {
+			lines.push(theme.fg("dim", "  (no content)"));
+			lines.push("");
+			return lines;
+		}
+
+		const contentLines = content.split("\n");
+		for (const line of contentLines) {
+			const highlighted = this.#highlightMarkdown(line);
+			lines.push(truncateToWidth(highlighted, width - 2));
+		}
+
+		lines.push("");
+		return lines;
+	}
+
+
 	#renderMcpDetails(raw: unknown, width: number): string[] {
 		const lines: string[] = [];
 		lines.push(theme.fg("muted", "Connection:"));
@@ -277,11 +307,40 @@ export class InspectorPanel implements Component {
 				lines.push(`  ${theme.fg("muted", "Args:")}       ${theme.fg("dim", args.join(" "))}`);
 			}
 
+			if (mcp?.url) {
+				lines.push(`  ${theme.fg("muted", "URL:")}        ${theme.fg("accent", mcp.url)}`);
+			}
+
+			if (mcp?.timeout != null) {
+				const seconds = Math.round(mcp.timeout / 1000);
+				lines.push(`  ${theme.fg("muted", "Timeout:")}    ${theme.fg("dim", `${seconds}s`)}`);
+			}
+
+			if (mcp?.auth?.type) {
+				const authLabel = mcp.auth.type === "oauth" ? "OAuth" : "API Key";
+				lines.push(`  ${theme.fg("muted", "Auth:")}       ${theme.fg("dim", authLabel)}`);
+			}
+
 			// Environment variables if present
 			if (mcp?.env && typeof mcp.env === "object") {
 				const envCount = Object.keys(mcp.env).length;
 				if (envCount > 0) {
 					lines.push(`  ${theme.fg("muted", "Env vars:")}   ${theme.fg("dim", `${envCount} defined`)}`);
+				}
+			}
+
+			if (typeof mcp?._toolCount === "number") {
+				lines.push(`  ${theme.fg("muted", "Tools:")}      ${theme.fg("dim", `${mcp._toolCount} registered`)}`);
+			}
+
+			// Server instructions (from MCP initialize response)
+			if (typeof mcp?._instructions === "string" && mcp._instructions.trim()) {
+				lines.push("");
+				lines.push(theme.fg("muted", "Instructions:"));
+				lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
+				for (const line of mcp._instructions.split("\n")) {
+					const highlighted = this.#highlightMarkdown(line);
+					lines.push(truncateToWidth(highlighted, width - 2));
 				}
 			}
 		} catch {
