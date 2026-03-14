@@ -71,7 +71,6 @@ export async function deleteExtension(ext: Extension): Promise<ActionResult> {
 	}
 }
 
-
 /**
  * Build valid move targets for an extension across all provider directories.
  * Excludes the extension's current directory.
@@ -209,5 +208,83 @@ async function moveMcpEntry(ext: Extension, targetDir: string): Promise<ActionRe
 
 	invalidate(ext.path);
 	invalidate(targetPath);
+	return { ok: true };
+}
+
+/**
+ * Rename an extension (file, directory, or MCP key).
+ * Preserves file extension for file-based kinds.
+ */
+export async function renameExtension(ext: Extension, newName: string): Promise<ActionResult> {
+	try {
+		if (ext.source.level === "native") {
+			return { ok: false, error: "Cannot rename native extensions" };
+		}
+		if (ext.kind === "context-file") {
+			return { ok: false, error: "Context files have fixed names" };
+		}
+
+		// Validate name
+		if (!newName || newName.includes("/") || newName.includes("\\")) {
+			return { ok: false, error: "Invalid name: must not contain path separators" };
+		}
+		if (newName === ext.name) {
+			return { ok: true }; // No-op
+		}
+
+		try {
+			await fs.access(ext.path);
+		} catch {
+			return { ok: false, error: "Source file not found" };
+		}
+
+		if (ext.kind === "mcp") {
+			return await renameMcpEntry(ext, newName);
+		}
+
+		// File-based: rename preserving extension
+		const dir = path.dirname(ext.path);
+		const stat = await fs.stat(ext.path);
+
+		let newPath: string;
+		if (stat.isDirectory()) {
+			newPath = path.join(dir, newName);
+		} else {
+			const extname = path.extname(ext.path);
+			// If newName already has the right extension, don't double it
+			newPath = newName.endsWith(extname)
+				? path.join(dir, newName)
+				: path.join(dir, newName + extname);
+		}
+
+		await fs.rename(ext.path, newPath);
+		invalidate(ext.path);
+		invalidate(newPath);
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: String(err) };
+	}
+}
+
+/** Rename an MCP server key in its JSON config. */
+async function renameMcpEntry(ext: Extension, newName: string): Promise<ActionResult> {
+	const raw = await fs.readFile(ext.path, "utf-8");
+	const json = JSON.parse(raw) as Record<string, unknown>;
+	const serversKey = "mcpServers" in json ? "mcpServers" : "servers" in json ? "servers" : null;
+	if (!serversKey) return { ok: false, error: "Cannot find servers key in config" };
+
+	const servers = json[serversKey] as Record<string, unknown>;
+	if (!(ext.name in servers)) return { ok: false, error: `Server "${ext.name}" not found` };
+	if (newName in servers) return { ok: false, error: `Server "${newName}" already exists` };
+
+	// Preserve insertion order: rebuild with renamed key in same position
+	const rebuilt: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(servers)) {
+		rebuilt[key === ext.name ? newName : key] = value;
+	}
+	json[serversKey] = rebuilt;
+
+	await fs.writeFile(ext.path, JSON.stringify(json, null, 2), "utf-8");
+	invalidate(ext.path);
 	return { ok: true };
 }
