@@ -451,8 +451,8 @@ export class ExtensionList implements Component {
 			return;
 		}
 
-		// g: Global toggle
-		if (data === "g" && this.#searchQuery.length === 0) {
+		// Ctrl+G: Global toggle
+		if (matchesKey(data, "ctrl+g")) {
 			const item = this.#listItems[this.#selectedIndex];
 			if (item?.type === "extension") {
 				const masterDisabled =
