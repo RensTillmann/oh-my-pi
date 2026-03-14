@@ -23,8 +23,6 @@ export interface ExtensionListCallbacks {
 	onSelectionChange?: (extension: Extension | null) => void;
 	/** Called when extension is toggled (Space — context-aware) */
 	onToggle?: (extension: Extension, enabled: boolean) => void;
-	/** Called when extension is explicitly project-toggled */
-	onProjectToggle?: (extensionId: string, enabled: boolean) => void;
 	/** Called when extension is globally toggled */
 	onGlobalToggle?: (extensionId: string, enabled: boolean) => void;
 	/** Called when master switch is toggled */
@@ -49,8 +47,6 @@ export class ExtensionList implements Component {
 	#focused = false;
 	#masterSwitchProvider: string | null = null;
 	#maxVisible: number;
-	/** Sub-selection within inline scope toggles: -1 = on item, 0 = project, 1 = global */
-	#subIndex = -1;
 
 	constructor(
 		private extensions: Extension[],
@@ -69,7 +65,6 @@ export class ExtensionList implements Component {
 
 	setExtensions(extensions: Extension[]): void {
 		this.extensions = extensions;
-		this.#subIndex = -1;
 		this.#rebuildList();
 		this.#clampSelection();
 	}
@@ -90,7 +85,6 @@ export class ExtensionList implements Component {
 	resetSelection(): void {
 		this.#selectedIndex = 0;
 		this.#scrollOffset = 0;
-		this.#subIndex = -1;
 		this.#notifySelectionChange();
 	}
 
@@ -107,7 +101,6 @@ export class ExtensionList implements Component {
 
 	setSearchQuery(query: string): void {
 		this.#searchQuery = query;
-		this.#subIndex = -1;
 		this.#rebuildList();
 		this.#selectedIndex = 0;
 		this.#scrollOffset = 0;
@@ -153,11 +146,6 @@ export class ExtensionList implements Component {
 				lines.push(this.#renderKindHeader(listItem, isSelected, width));
 			} else {
 				lines.push(this.#renderExtensionRow(listItem.item, isSelected, width, masterDisabled));
-				// Show inline scope toggles for the selected extension
-				if (isSelected && !masterDisabled) {
-					lines.push(this.#renderScopeToggle(listItem.item, 0, width));
-					lines.push(this.#renderScopeToggle(listItem.item, 1, width));
-				}
 			}
 		}
 
@@ -215,13 +203,10 @@ export class ExtensionList implements Component {
 		let name = ext.displayName;
 		const nameWidth = Math.min(24, width - 20);
 
-		// Origin badge: [G] for user-level (global), [L] for project-level (local)
-		let originBadge: string;
-		if (ext.source.level === "project") {
-			originBadge = ext.isProjectDisabled ? theme.fg("error", "[L]") : theme.fg("muted", "[L]");
-		} else {
-			originBadge = ext.isGlobalDisabled ? theme.fg("error", "[G]") : theme.fg("muted", "[G]");
-		}
+		// Origin badge: color reflects disable state across both scopes
+		const badgeLabel = ext.source.level === "project" ? "[L]" : "[G]";
+		const badgeColor = ext.isGlobalDisabled ? "error" : ext.isProjectDisabled ? "warning" : "muted";
+		const originBadge = theme.fg(badgeColor, badgeLabel);
 
 		// Build the line with indentation
 		let line = `   ${stateIcon} ${originBadge} `;
@@ -255,20 +240,6 @@ export class ExtensionList implements Component {
 		return truncateToWidth(line, width);
 	}
 
-	#renderScopeToggle(ext: Extension, toggleIndex: number, width: number): string {
-		const isSubSelected = this.#subIndex === toggleIndex;
-		const checked = toggleIndex === 0 ? ext.isProjectDisabled : ext.isGlobalDisabled;
-		const checkbox = checked ? theme.fg("warning", "[x]") : theme.fg("dim", "[ ]");
-		const label = toggleIndex === 0 ? "disable for this project" : "disable globally";
-
-		let line = `       ${checkbox} ${label}`;
-		if (isSubSelected) {
-			line = theme.bg("selectedBg", theme.bold(theme.fg("accent", line)));
-		} else {
-			line = theme.fg("muted", line);
-		}
-		return truncateToWidth(line, width);
-	}
 
 	#getKindIcon(kind: ExtensionKind): string {
 		switch (kind) {
@@ -439,52 +410,18 @@ export class ExtensionList implements Component {
 	handleInput(data: string): void {
 		// Navigation: Up
 		if (matchesKey(data, "up") || data === "k") {
-			if (this.#subIndex > -1) {
-				// Move up within scope toggles, or back to item
-				this.#subIndex--;
-			} else {
-				this.#subIndex = -1;
-				this.#moveSelectionUp();
-			}
+			this.#moveSelectionUp();
 			return;
 		}
 
 		// Navigation: Down
 		if (matchesKey(data, "down") || data === "j") {
-			const item = this.#listItems[this.#selectedIndex];
-			if (item?.type === "extension" && this.#subIndex < 1) {
-				const masterDisabled =
-					this.#masterSwitchProvider !== null && !isProviderEnabled(this.#masterSwitchProvider);
-				if (!masterDisabled) {
-					// Move into scope toggles
-					this.#subIndex++;
-					return;
-				}
-			}
-			this.#subIndex = -1;
 			this.#moveSelectionDown();
 			return;
 		}
 
 		// Space or Enter: Toggle
 		if (data === " " || matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
-			// Sub-option selected: toggle that scope directly
-			if (this.#subIndex >= 0) {
-				const item = this.#listItems[this.#selectedIndex];
-				if (item?.type === "extension") {
-					const ext = item.item;
-					if (this.#subIndex === 0) {
-						// Project toggle
-						this.callbacks.onProjectToggle?.(ext.id, ext.isProjectDisabled);
-					} else {
-						// Global toggle
-						this.callbacks.onGlobalToggle?.(ext.id, ext.isGlobalDisabled);
-					}
-				}
-				return;
-			}
-
-			// Main item: existing behavior
 			const item = this.#listItems[this.#selectedIndex];
 			if (item?.type === "master") {
 				this.callbacks.onMasterToggle?.(item.providerId);

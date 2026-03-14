@@ -77,9 +77,6 @@ export class ExtensionDashboard extends Container {
 				onToggle: (ext, enabled) => {
 					this.#handleSmartToggle(ext, enabled);
 				},
-				onProjectToggle: (extensionId, enabled) => {
-					this.#handleProjectExtensionToggle(extensionId, enabled);
-				},
 				onGlobalToggle: (extensionId, enabled) => {
 					this.#handleGlobalExtensionToggle(extensionId, enabled);
 				},
@@ -229,32 +226,6 @@ export class ExtensionDashboard extends Container {
 
 		sm.set("disabledExtensions", globalDisabled);
 		sm.setProject("projectDisabledExtensions", projectDisabled);
-		setDisabledExtensions(
-			(sm.get("disabledExtensions") as string[]) ?? [],
-			(sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? [],
-		);
-		void this.#refreshFromState();
-	}
-
-
-	#handleProjectExtensionToggle(extensionId: string, enabled: boolean): void {
-		const sm = this.settings ?? Settings.instance;
-		if (!sm) return;
-
-		const disabled = ((sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? []).slice();
-		if (enabled) {
-			const index = disabled.indexOf(extensionId);
-			if (index !== -1) {
-				disabled.splice(index, 1);
-				sm.setProject("projectDisabledExtensions", disabled);
-			}
-		} else {
-			if (!disabled.includes(extensionId)) {
-				disabled.push(extensionId);
-				sm.setProject("projectDisabledExtensions", disabled);
-			}
-		}
-
 		setDisabledExtensions(
 			(sm.get("disabledExtensions") as string[]) ?? [],
 			(sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? [],
