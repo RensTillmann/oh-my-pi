@@ -27,7 +27,7 @@ import { theme } from "../../../modes/theme/theme";
 import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
-import type { DashboardState } from "./types";
+import type { DashboardState, Extension } from "./types";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -72,8 +72,8 @@ export class ExtensionDashboard extends Container {
 					this.#state.selected = ext;
 					this.#inspector.setExtension(ext);
 				},
-				onToggle: (extensionId, enabled) => {
-					this.#handleProjectExtensionToggle(extensionId, enabled);
+				onToggle: (ext, enabled) => {
+					this.#handleSmartToggle(ext, enabled);
 				},
 				onGlobalToggle: (extensionId, enabled) => {
 					this.#handleGlobalExtensionToggle(extensionId, enabled);
@@ -186,6 +186,22 @@ export class ExtensionDashboard extends Container {
 
 		void this.#refreshFromState();
 	}
+
+	/**
+	 * Smart toggle: inspect the extension's current disable scope and
+	 * route to the correct handler. Disabling always targets project scope;
+	 * re-enabling targets whichever scope disabled the item.
+	 */
+	#handleSmartToggle(ext: Extension, enabled: boolean): void {
+		if (enabled && ext.disabledReason === "item-disabled") {
+			// Re-enable a globally disabled item → must remove from global list
+			this.#handleGlobalExtensionToggle(ext.id, true);
+		} else {
+			// Disable (always project-scoped) or re-enable a project-disabled item
+			this.#handleProjectExtensionToggle(ext.id, enabled);
+		}
+	}
+
 
 	#handleProjectExtensionToggle(extensionId: string, enabled: boolean): void {
 		const sm = this.settings ?? Settings.instance;
