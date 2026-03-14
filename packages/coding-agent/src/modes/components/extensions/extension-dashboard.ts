@@ -119,10 +119,11 @@ export class ExtensionDashboard extends Container {
 		// 2-column body with height limit
 		// Reserve ~8 lines for header, tabs, help text, borders
 		const bodyMaxHeight = Math.max(5, this.terminalHeight - 8);
+		this.#inspector.setMaxHeight(bodyMaxHeight);
 		this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", " \u2191/\u2193: navigate  Space/Enter: toggle  Tab: provider  Esc: close"), 0, 0));
+		this.addChild(new Text(theme.fg("dim", " \u2191/\u2193: navigate  \u2190/\u2192: category  Space: cycle  PgUp/Dn: scroll  Tab: provider  Esc: close"), 0, 0));
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
@@ -323,6 +324,30 @@ export class ExtensionDashboard extends Container {
 		}
 		if (matchesKey(data, "shift+tab")) {
 			this.#switchTab(-1);
+			return;
+		}
+
+		// PgUp/PgDn: Scroll inspector preview
+		if (matchesKey(data, "pageUp")) {
+			this.#inspector.scrollPreview(-10);
+			this.#buildLayout();
+			return;
+		}
+		if (matchesKey(data, "pageDown")) {
+			this.#inspector.scrollPreview(10);
+			this.#buildLayout();
+			return;
+		}
+
+		// Left/Right: Jump to prev/next category header (ALL view only)
+		if (matchesKey(data, "left")) {
+			this.#mainList.jumpToPrevCategory();
+			this.#buildLayout();
+			return;
+		}
+		if (matchesKey(data, "right")) {
+			this.#mainList.jumpToNextCategory();
+			this.#buildLayout();
 			return;
 		}
 

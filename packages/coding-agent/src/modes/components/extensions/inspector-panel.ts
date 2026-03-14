@@ -11,9 +11,25 @@ import type { Extension } from "./types";
 
 export class InspectorPanel implements Component {
 	#extension: Extension | null = null;
+	#previewScrollOffset = 0;
+	#maxHeight = 20;
+	#previewBudget = 0;
+	#fullPreviewLength = 0;
 
 	setExtension(extension: Extension | null): void {
 		this.#extension = extension;
+		this.#previewScrollOffset = 0;
+	}
+
+	setMaxHeight(h: number): void {
+		this.#maxHeight = h;
+	}
+
+	scrollPreview(delta: number): void {
+		const hasOverflow = this.#fullPreviewLength > this.#previewBudget;
+		const visibleCount = hasOverflow ? Math.max(0, this.#previewBudget - 1) : this.#previewBudget;
+		const maxOff = Math.max(0, this.#fullPreviewLength - visibleCount);
+		this.#previewScrollOffset = Math.max(0, Math.min(maxOff, this.#previewScrollOffset + delta));
 	}
 
 	invalidate(): void {}
@@ -24,55 +40,69 @@ export class InspectorPanel implements Component {
 		}
 
 		const ext = this.#extension;
-		const lines: string[] = [];
+		const headerLines: string[] = [];
 
-		// Name header
-		lines.push(theme.bold(theme.fg("accent", ext.displayName)));
-		lines.push("");
+		// Name
+		headerLines.push(theme.bold(theme.fg("accent", ext.displayName)));
 
-		// Kind badge
-		lines.push(theme.fg("muted", "Type: ") + this.#getKindBadge(ext.kind));
-		lines.push("");
+		// Inline kind + status (no labels)
+		const kindBadge = this.#getKindBadge(ext.kind);
+		const statusParts = this.#getStatusLines(ext);
+		headerLines.push(`${kindBadge}  ${statusParts[0]}`);
+		for (let i = 1; i < statusParts.length; i++) {
+			headerLines.push(`  ${statusParts[i]}`);
+		}
+		headerLines.push("");
 
-		// Description (wrapped)
+		// Description
 		const desc = ext.description;
 		const isValidDescription = typeof desc === "string" && desc.length > 0;
 		if (isValidDescription && width > 2) {
 			const wrapped = wrapTextWithAnsi(desc, width - 2);
 			for (const line of wrapped) {
-				lines.push(truncateToWidth(line, width));
+				headerLines.push(truncateToWidth(line, width));
 			}
-			lines.push("");
+			headerLines.push("");
 		} else if (isValidDescription) {
-			// Width too small for wrapping, show truncated single line
-			lines.push(truncateToWidth(desc, width));
-			lines.push("");
+			headerLines.push(truncateToWidth(desc, width));
+			headerLines.push("");
 		}
 
 		// Origin
-		lines.push(theme.fg("muted", "Origin:"));
+		headerLines.push(theme.fg("muted", "Origin:"));
 		const levelLabel = ext.source.level === "user" ? "User" : ext.source.level === "project" ? "Project" : "Native";
-		lines.push(`  ${theme.italic(`via ${ext.source.providerName} (${levelLabel})`)}`);
+		headerLines.push(`  ${theme.italic(`via ${ext.source.providerName} (${levelLabel})`)}`);
 		const shortened = shortenPath(ext.path, os.homedir());
-		// If path is very long, show just the last parts
 		const displayPath =
 			shortened.length > 40 && shortened.split("/").length > 3
 				? `.../${shortened.split("/").slice(-3).join("/")}`
 				: shortened;
-		lines.push(`  ${theme.fg("dim", displayPath)}`);
-		lines.push("");
+		headerLines.push(`  ${theme.fg("dim", displayPath)}`);
+		headerLines.push("");
 
-		// Status
-		lines.push(theme.fg("muted", "Status:"));
-		const statusLines = this.#getStatusLines(ext);
-		for (const sl of statusLines) {
-			lines.push(`  ${sl}`);
-		}
-		lines.push("");
-
-		// Preview section (routed based on kind)
+		// Preview (scrollable)
 		const previewLines = this.#renderPreview(ext, width);
-		lines.push(...previewLines);
+		this.#fullPreviewLength = previewLines.length;
+		this.#previewBudget = Math.max(0, this.#maxHeight - headerLines.length);
+
+		const hasOverflow = previewLines.length > this.#previewBudget;
+		const visibleCount = hasOverflow ? Math.max(0, this.#previewBudget - 1) : this.#previewBudget;
+
+		// Clamp scroll offset
+		const maxOff = Math.max(0, previewLines.length - visibleCount);
+		this.#previewScrollOffset = Math.min(this.#previewScrollOffset, maxOff);
+
+		const visiblePreview = previewLines.slice(
+			this.#previewScrollOffset,
+			this.#previewScrollOffset + visibleCount,
+		);
+
+		const lines = [...headerLines, ...visiblePreview];
+
+		// Scroll hint
+		if (hasOverflow && this.#previewBudget > 0) {
+			lines.push(theme.fg("dim", `(PgUp/PgDn to scroll \u2014 ${this.#previewScrollOffset + 1}/${previewLines.length})`));
+		}
 
 		return lines;
 	}
@@ -119,14 +149,11 @@ export class InspectorPanel implements Component {
 		}
 
 		const fileLines = content.split("\n");
-		for (const line of fileLines.slice(0, 20)) {
+		for (const line of fileLines) {
 			const highlighted = this.#highlightMarkdown(line);
 			lines.push(truncateToWidth(highlighted, width - 2));
 		}
 
-		if (fileLines.length > 20) {
-			lines.push(theme.fg("dim", "(truncated at line 20)"));
-		}
 
 		lines.push("");
 		return lines;
@@ -215,14 +242,11 @@ export class InspectorPanel implements Component {
 			if (!instruction) {
 				lines.push(theme.fg("dim", "  (no instruction text)"));
 			} else {
-				const instructionLines = instruction.split("\n").slice(0, 15);
+				const instructionLines = instruction.split("\n");
 				for (const line of instructionLines) {
 					lines.push(truncateToWidth(line, width - 2));
 				}
 
-				if (instruction.split("\n").length > 15) {
-					lines.push(theme.fg("dim", "(truncated at line 15)"));
-				}
 			}
 		} catch {
 			lines.push(theme.fg("dim", "  (unable to parse skill content)"));
