@@ -28,7 +28,7 @@ import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import type { DashboardState, Extension } from "./types";
-import { setDisabledExtensions } from "../../../capability";
+import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -96,6 +96,7 @@ export class ExtensionDashboard extends Container {
 
 		// Create inspector
 		this.#inspector = new InspectorPanel();
+		this.#inspector.setProjectPath(this.cwd);
 		if (this.#state.selected) {
 			this.#inspector.setExtension(this.#state.selected);
 		}
@@ -128,7 +129,7 @@ export class ExtensionDashboard extends Container {
 		this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", " \u2191/\u2193: navigate  \u2190/\u2192: category  Space: cycle  PgUp/Dn: scroll  Tab: provider  Esc: close"), 0, 0));
+		this.addChild(new Text(theme.fg("dim", " \u2191/\u2193: navigate  \u2190/\u2192: category  Space: cycle  R: restrict  PgUp/Dn: scroll  Tab: provider  Esc: close"), 0, 0));
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
@@ -239,6 +240,30 @@ export class ExtensionDashboard extends Container {
 		);
 		void this.#refreshFromState();
 	}
+
+	#handleRestrictionToggle(ext: Extension): void {
+		// No-op if globally disabled
+		if (ext.isGlobalDisabled) return;
+
+		const sm = this.settings ?? Settings.instance;
+		if (!sm) return;
+
+		const restrictions = ((sm.get("restrictedExtensions") as Record<string, string>) ?? {});
+		const updated = { ...restrictions };
+
+		if (ext.id in updated) {
+			// Remove restriction
+			delete updated[ext.id];
+		} else {
+			// Restrict to current project
+			updated[ext.id] = this.cwd;
+		}
+
+		sm.set("restrictedExtensions", updated);
+		setRestrictedExtensions(updated, this.cwd);
+		void this.#refreshFromState();
+	}
+
 
 	async #refreshFromState(): Promise<void> {
 		// Remember current tab ID before refresh
@@ -357,6 +382,13 @@ export class ExtensionDashboard extends Container {
 		if (matchesKey(data, "right")) {
 			this.#mainList.jumpToNextCategory();
 			this.#buildLayout();
+			return;
+		}
+
+		// R: Toggle project restriction
+		if (data === "r" || data === "R") {
+			const ext = this.#mainList.getSelectedExtension();
+			if (ext) this.#handleRestrictionToggle(ext);
 			return;
 		}
 

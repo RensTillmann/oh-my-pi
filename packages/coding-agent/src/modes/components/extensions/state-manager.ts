@@ -18,6 +18,8 @@ import {
 	disableProvider,
 	enableProvider,
 	getAllProvidersInfo,
+	getExtensionRestriction,
+	isExtensionRestricted,
 	isProviderEnabled,
 	loadCapability,
 } from "../../../discovery";
@@ -69,6 +71,8 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (item as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(item._source.provider);
+			const restricted = isExtensionRestricted(id);
+			const restrictedTo = getExtensionRestriction(id);
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -108,6 +112,8 @@ export async function loadAllExtensions(
 				shadowedBy: opts?.getShadowedBy?.(item),
 				isGlobalDisabled: isDisabled,
 				isProjectDisabled: isProjectDisabled,
+				isRestricted: restricted,
+				restrictedToProject: restrictedTo,
 				raw: item,
 			});
 		}
@@ -165,6 +171,8 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (server as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(server._source.provider);
+			const restricted = isExtensionRestricted(id);
+			const restrictedTo = getExtensionRestriction(id);
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -202,6 +210,8 @@ export async function loadAllExtensions(
 				disableScope,
 				isGlobalDisabled: isDisabled,
 				isProjectDisabled: isProjectDisabled,
+				isRestricted: restricted,
+				restrictedToProject: restrictedTo,
 				raw: { ...server, _instructions: mcpManager?.getConnection(server.name)?.instructions, _toolCount: mcpManager?.getConnection(server.name)?.tools?.length },
 			});
 		}
@@ -250,6 +260,8 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (hook as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(hook._source.provider);
+			const restricted = isExtensionRestricted(id);
+			const restrictedTo = getExtensionRestriction(id);
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -287,6 +299,8 @@ export async function loadAllExtensions(
 				disableScope,
 				isGlobalDisabled: isDisabled,
 				isProjectDisabled: isProjectDisabled,
+				isRestricted: restricted,
+				restrictedToProject: restrictedTo,
 				raw: hook,
 			});
 		}
@@ -305,6 +319,8 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (file as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(file._source.provider);
+			const restricted = isExtensionRestricted(id);
+			const restrictedTo = getExtensionRestriction(id);
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -342,6 +358,8 @@ export async function loadAllExtensions(
 				disableScope,
 				isGlobalDisabled: isDisabled,
 				isProjectDisabled: isProjectDisabled,
+				isRestricted: restricted,
+				restrictedToProject: restrictedTo,
 				raw: file,
 			});
 		}

@@ -15,6 +15,7 @@ export class InspectorPanel implements Component {
 	#maxHeight = 20;
 	#previewBudget = 0;
 	#fullPreviewLength = 0;
+	#projectPath: string | null = null;
 
 	setExtension(extension: Extension | null): void {
 		this.#extension = extension;
@@ -23,6 +24,10 @@ export class InspectorPanel implements Component {
 
 	setMaxHeight(h: number): void {
 		this.#maxHeight = h;
+	}
+
+	setProjectPath(path: string): void {
+		this.#projectPath = path;
 	}
 
 	scrollPreview(delta: number): void {
@@ -401,6 +406,17 @@ export class InspectorPanel implements Component {
 			parts.push(theme.fg("warning", `${theme.status.disabled} Disabled for this project`));
 		}
 		if (parts.length > 0) return parts;
+
+		// Restriction status
+		if (ext.isRestricted && ext.restrictedToProject) {
+			if (ext.restrictedToProject === this.#projectPath) {
+				parts.push(theme.fg("accent", `${theme.status.enabled} Only this project`));
+			} else {
+				const shortened = shortenPath(ext.restrictedToProject, os.homedir());
+				parts.push(theme.fg("dim", `${theme.status.disabled} Restricted to: ${shortened}`));
+			}
+			if (parts.length > 0) return parts;
+		}
 
 		// Provider disabled or other
 		if (ext.disabledReason === "provider-disabled") {

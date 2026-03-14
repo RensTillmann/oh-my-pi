@@ -65,6 +65,10 @@ export interface Extension {
 	isGlobalDisabled: boolean;
 	/** Whether this extension is in the project projectDisabledExtensions list */
 	isProjectDisabled: boolean;
+	/** Whether this extension is restricted to a specific project */
+	isRestricted: boolean;
+	/** Project path this extension is restricted to (if restricted) */
+	restrictedToProject?: string;
 	/** Raw item data for inspector */
 	raw: unknown;
 }
