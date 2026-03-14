@@ -30,7 +30,7 @@ import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import type { DashboardState, Extension } from "./types";
 import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
-import { deleteExtension, getMoveTargets, moveExtension, type ActionResult, type MoveTarget } from "./extension-actions";
+import { deleteExtension, getMoveTargets, moveExtension, renameExtension, type ActionResult, type MoveTarget } from "./extension-actions";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -170,7 +170,6 @@ export class ExtensionDashboard extends Container {
 		}
 		return theme.fg("dim", " \u2191/\u2193: navigate  \u2190/\u2192: category  Space: cycle  D: delete  M: move  N: rename  E: edit  R: restrict  Tab: provider  Esc: close");
 	}
-
 
 	#renderTabBar(): string {
 		const parts: string[] = [" "];
@@ -454,6 +453,13 @@ export class ExtensionDashboard extends Container {
 				}
 				break;
 			}
+			case "rename": {
+				const mode = this.#actionMode as { type: "input"; ext: Extension; buffer: string };
+				if (mode.buffer && mode.buffer !== mode.ext.name) {
+					result = await renameExtension(mode.ext, mode.buffer);
+				}
+				break;
+			}
 		}
 
 		this.#actionMode = null;
@@ -571,7 +577,6 @@ export class ExtensionDashboard extends Container {
 			return;
 		}
 
-
 		// E: Open in editor
 		if (data === "e" || data === "E") {
 			const ext = this.#mainList.getSelectedExtension();
@@ -581,6 +586,18 @@ export class ExtensionDashboard extends Container {
 			return;
 		}
 
+		// N: Rename extension
+		if (data === "n" || data === "N") {
+			const ext = this.#mainList.getSelectedExtension();
+			if (ext && ext.source.level !== "native" && ext.kind !== "context-file") {
+				this.#actionMode = {
+					type: "input", action: "rename", ext,
+					buffer: ext.name,
+				};
+				this.#buildLayout();
+			}
+			return;
+		}
 
 		// All other input goes to the list
 		this.#mainList.handleInput(data);
