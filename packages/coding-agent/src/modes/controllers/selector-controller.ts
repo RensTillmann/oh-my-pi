@@ -174,6 +174,16 @@ export class SelectorController {
 			dashboard.onRequestRender = () => {
 				this.ctx.ui.requestRender();
 			};
+			dashboard.onOpenFile = (filePath) => {
+				done();
+				const editor = process.env.EDITOR || process.env.VISUAL;
+				if (editor) {
+					Bun.spawn([editor, filePath], { stdio: ["inherit", "inherit", "inherit"] });
+				} else {
+					this.ctx.editor.setText(`@${filePath} `);
+				}
+				this.ctx.ui.requestRender();
+			};
 			return { component: dashboard, focus: dashboard };
 		});
 	}
