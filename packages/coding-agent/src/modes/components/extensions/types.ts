@@ -61,6 +61,10 @@ export interface Extension {
 	disableScope?: "global" | "project";
 	/** If shadowed, what shadows it */
 	shadowedBy?: string;
+	/** Whether this extension is in the global disabledExtensions list */
+	isGlobalDisabled: boolean;
+	/** Whether this extension is in the project projectDisabledExtensions list */
+	isProjectDisabled: boolean;
 	/** Raw item data for inspector */
 	raw: unknown;
 }
