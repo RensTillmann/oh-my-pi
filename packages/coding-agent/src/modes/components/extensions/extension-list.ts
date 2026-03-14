@@ -16,7 +16,7 @@ import {
 import { isProviderEnabled } from "../../../discovery";
 import { theme } from "../../../modes/theme/theme";
 import { applyFilter } from "./state-manager";
-import type { DisabledReason, Extension, ExtensionKind, ExtensionState } from "./types";
+import type { Extension, ExtensionKind, ExtensionState } from "./types";
 
 export interface ExtensionListCallbacks {
 	/** Called when selection changes */
@@ -221,12 +221,8 @@ export class ExtensionList implements Component {
 		const namePadded = this.#padText(name, nameWidth);
 		line += namePadded;
 
-		// Disable scope suffix for disabled items
-		const scopeSuffix = this.#getScopeSuffix(ext.disabledReason);
-		if (scopeSuffix) {
-			line += ` ${theme.fg("dim", scopeSuffix)}`;
-		} else if (ext.trigger) {
-			// Trigger hint (only when no scope suffix)
+		// Trigger hint
+		if (ext.trigger) {
 			const triggerStyle = effectivelyDisabled ? "dim" : "muted";
 			const remainingWidth = width - visibleWidth(line) - 2;
 			if (remainingWidth > 5) {
@@ -283,17 +279,6 @@ export class ExtensionList implements Component {
 		}
 	}
 
-	#getScopeSuffix(reason: DisabledReason | undefined): string | null {
-		// Only show suffix when the scope is non-obvious
-		switch (reason) {
-			case "item-disabled-project":
-				return "(project)";
-			case "shadowed":
-				return "(shadowed)";
-			default:
-				return null;
-		}
-	}
 
 	#padText(text: string, targetWidth: number): string {
 		const width = visibleWidth(text);
