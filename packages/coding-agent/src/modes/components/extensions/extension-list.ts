@@ -225,8 +225,11 @@ export class ExtensionList implements Component {
 		const badgeColor = ext.isGlobalDisabled ? "error" : ext.isProjectDisabled ? "warning" : "muted";
 		const originBadge = theme.fg(badgeColor, badgeLabel);
 
+		// Restriction badge
+		const restrictBadge = ext.isRestricted ? ` ${theme.fg("accent", "[R]")}` : "";
+
 		// Build the line with indentation
-		let line = `   ${stateIcon} ${originBadge} `;
+		let line = `   ${stateIcon} ${originBadge}${restrictBadge} `;
 
 		if (isSelected && !masterDisabled) {
 			name = theme.bold(theme.fg("accent", name));

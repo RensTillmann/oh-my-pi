@@ -629,7 +629,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"settings",
 		async () => options.settings ?? (await Settings.init({ cwd, agentDir })),
 	);
-	logger.time("initializeWithSettings", initializeWithSettings, settings);
+	logger.time("initializeWithSettings", initializeWithSettings, settings, cwd);
 	if (!options.modelRegistry) {
 		modelRegistry.refreshInBackground();
 	}
