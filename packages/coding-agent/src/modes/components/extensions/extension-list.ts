@@ -284,13 +284,10 @@ export class ExtensionList implements Component {
 	}
 
 	#getScopeSuffix(reason: DisabledReason | undefined): string | null {
+		// Only show suffix when the scope is non-obvious
 		switch (reason) {
 			case "item-disabled-project":
 				return "(project)";
-			case "item-disabled":
-				return "(global)";
-			case "provider-disabled":
-				return "(provider)";
 			case "shadowed":
 				return "(shadowed)";
 			default:
