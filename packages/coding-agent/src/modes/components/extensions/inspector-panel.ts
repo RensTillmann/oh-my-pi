@@ -57,6 +57,15 @@ export class InspectorPanel implements Component {
 		for (let i = 1; i < statusParts.length; i++) {
 			headerLines.push(`  ${statusParts[i]}`);
 		}
+
+		// Action hints
+		if (ext.source.level === "native") {
+			headerLines.push(theme.fg("dim", "  (native \u2014 read-only)"));
+		} else {
+			const actions = ["D: delete", "M: move", "N: rename", "E: edit"];
+			if (ext.kind === "context-file") actions.splice(2, 1); // no rename for context files
+			headerLines.push(theme.fg("dim", `  ${actions.join("  ")}`));
+		}
 		headerLines.push("");
 
 		// Description

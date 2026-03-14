@@ -29,6 +29,7 @@ import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import type { DashboardState, Extension } from "./types";
 import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
+import { deleteExtension, type ActionResult, type MoveTarget } from "./extension-actions";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -37,8 +38,15 @@ export class ExtensionDashboard extends Container {
 	#scrollStartTime = 0;
 	#lastScrollTime = 0;
 	#lastScrollDirection = 0;
+	#actionMode:
+		| null
+		| { type: "confirm"; action: "delete"; ext: Extension; message: string }
+		| { type: "picker"; action: "move"; ext: Extension; options: MoveTarget[]; selectedIndex: number }
+		| { type: "input"; action: "rename" | "custom-path"; ext: Extension; buffer: string; placeholder?: string }
+		= null;
 
 	onClose?: () => void;
+	onOpenFile?: (path: string) => void;
 	onRequestRender?: () => void;
 
 	private constructor(
@@ -129,11 +137,39 @@ export class ExtensionDashboard extends Container {
 		this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", " \u2191/\u2193: navigate  \u2190/\u2192: category  Space: cycle  R: restrict  PgUp/Dn: scroll  Tab: provider  Esc: close"), 0, 0));
+		this.addChild(new Text(this.#renderHelpBar(), 0, 0));
 
 		// Bottom border
 		this.addChild(new DynamicBorder());
 	}
+
+	#renderHelpBar(): string {
+		if (this.#actionMode) {
+			switch (this.#actionMode.type) {
+				case "confirm":
+					return theme.fg("warning", ` \u26a0 ${this.#actionMode.message}  y: confirm  any key: cancel`);
+				case "picker": {
+					const mode = this.#actionMode;
+					const lines: string[] = [];
+					lines.push(theme.fg("accent", ` Move "${mode.ext.displayName}" to:`));
+					for (let i = 0; i < mode.options.length; i++) {
+						const opt = mode.options[i];
+						const marker = i === mode.selectedIndex ? "\u25b8" : " ";
+						const text = ` ${marker} ${opt.label}`;
+						lines.push(i === mode.selectedIndex ? theme.fg("accent", text) : theme.fg("muted", text));
+					}
+					lines.push(theme.fg("dim", " \u2191/\u2193: select  Enter: confirm  Esc: cancel"));
+					return lines.join("\n");
+				}
+				case "input": {
+					const label = this.#actionMode.action === "rename" ? "Rename" : "Move to";
+					return theme.fg("accent", ` ${label}: ${this.#actionMode.buffer}\u2588  Enter: confirm  Esc: cancel`);
+				}
+			}
+		}
+		return theme.fg("dim", " \u2191/\u2193: navigate  \u2190/\u2192: category  Space: cycle  D: delete  M: move  N: rename  E: edit  R: restrict  Tab: provider  Esc: close");
+	}
+
 
 	#renderTabBar(): string {
 		const parts: string[] = [" "];
@@ -327,7 +363,101 @@ export class ExtensionDashboard extends Container {
 		this.#buildLayout();
 	}
 
+	#handleActionModeInput(data: string): void {
+		if (!this.#actionMode) return;
+
+		switch (this.#actionMode.type) {
+			case "confirm":
+				if (data === "y" || data === "Y") {
+					void this.#executeAction();
+				} else {
+					this.#actionMode = null;
+					this.#buildLayout();
+					this.onRequestRender?.();
+				}
+				break;
+			case "picker": {
+				const mode = this.#actionMode;
+				if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
+					this.#actionMode = null;
+					this.#buildLayout();
+					this.onRequestRender?.();
+				} else if (matchesKey(data, "up") || data === "k") {
+					mode.selectedIndex = (mode.selectedIndex - 1 + mode.options.length) % mode.options.length;
+					this.#buildLayout();
+					this.onRequestRender?.();
+				} else if (matchesKey(data, "down") || data === "j") {
+					mode.selectedIndex = (mode.selectedIndex + 1) % mode.options.length;
+					this.#buildLayout();
+					this.onRequestRender?.();
+				} else if (matchesKey(data, "return")) {
+					const selected = mode.options[mode.selectedIndex];
+					if (selected && selected.label === "Custom path...") {
+						this.#actionMode = {
+							type: "input", action: "custom-path", ext: mode.ext,
+							buffer: "", placeholder: "Enter target directory path",
+						};
+						this.#buildLayout();
+						this.onRequestRender?.();
+					} else if (selected) {
+						void this.#executeAction();
+					}
+				}
+				break;
+			}
+			case "input": {
+				const mode = this.#actionMode;
+				if (matchesKey(data, "escape") || matchesKey(data, "esc")) {
+					this.#actionMode = null;
+					this.#buildLayout();
+					this.onRequestRender?.();
+				} else if (matchesKey(data, "return")) {
+					if (mode.buffer.length > 0) {
+						void this.#executeAction();
+					}
+				} else if (matchesKey(data, "backspace")) {
+					mode.buffer = mode.buffer.slice(0, -1);
+					this.#buildLayout();
+					this.onRequestRender?.();
+				} else if (data.length === 1 && data.charCodeAt(0) >= 32) {
+					mode.buffer += data;
+					this.#buildLayout();
+					this.onRequestRender?.();
+				}
+				break;
+			}
+		}
+	}
+
+	async #executeAction(): Promise<void> {
+		if (!this.#actionMode) return;
+
+		let result: ActionResult | null = null;
+
+		switch (this.#actionMode.action) {
+			case "delete":
+				result = await deleteExtension(this.#actionMode.ext);
+				break;
+		}
+
+		this.#actionMode = null;
+
+		if (result && !result.ok) {
+			// Show error briefly in help bar, then clear
+			// For now, just rebuild — the item will be gone on success
+		}
+
+		await this.#refreshFromState();
+	}
+
+
 	handleInput(data: string): void {
+		// Action mode intercepts all input
+		if (this.#actionMode) {
+			this.#handleActionModeInput(data);
+			return;
+		}
+
 		// Ctrl+C - close immediately
 		if (matchesKey(data, "ctrl+c")) {
 			this.onClose?.();
@@ -391,6 +521,29 @@ export class ExtensionDashboard extends Container {
 			if (ext) this.#handleRestrictionToggle(ext);
 			return;
 		}
+
+		// D: Delete extension
+		if (data === "d" || data === "D") {
+			const ext = this.#mainList.getSelectedExtension();
+			if (ext && ext.source.level !== "native") {
+				this.#actionMode = {
+					type: "confirm", action: "delete", ext,
+					message: `Delete ${ext.kind} "${ext.displayName}"?`,
+				};
+				this.#buildLayout();
+			}
+			return;
+		}
+
+		// E: Open in editor
+		if (data === "e" || data === "E") {
+			const ext = this.#mainList.getSelectedExtension();
+			if (ext) {
+				this.onOpenFile?.(ext.path);
+			}
+			return;
+		}
+
 
 		// All other input goes to the list
 		this.#mainList.handleInput(data);
