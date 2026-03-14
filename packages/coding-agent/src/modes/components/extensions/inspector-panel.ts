@@ -7,7 +7,7 @@ import * as os from "node:os";
 import { type Component, truncateToWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { theme } from "../../../modes/theme/theme";
 import { shortenPath } from "../../../tools/render-utils";
-import type { Extension, ExtensionState } from "./types";
+import type { Extension } from "./types";
 
 export class InspectorPanel implements Component {
 	#extension: Extension | null = null;
@@ -62,9 +62,12 @@ export class InspectorPanel implements Component {
 		lines.push(`  ${theme.fg("dim", displayPath)}`);
 		lines.push("");
 
-		// Status badge
+		// Status
 		lines.push(theme.fg("muted", "Status:"));
-		lines.push(`  ${this.#getStatusBadge(ext.state, ext.disabledReason, ext.shadowedBy)}`);
+		const statusLines = this.#getStatusLines(ext);
+		for (const sl of statusLines) {
+			lines.push(`  ${sl}`);
+		}
 		lines.push("");
 
 		// Preview section (routed based on kind)
@@ -297,21 +300,30 @@ export class InspectorPanel implements Component {
 		return theme.fg(color as any, kind);
 	}
 
-	#getStatusBadge(state: ExtensionState, reason?: string, shadowedBy?: string): string {
-		switch (state) {
-			case "active":
-				return theme.fg("success", `${theme.status.enabled} Active`);
-			case "disabled": {
-				const reasonText =
-					reason === "provider-disabled"
-						? "provider disabled"
-						: reason === "item-disabled"
-							? "manually disabled"
-							: "unknown";
-				return theme.fg("dim", `${theme.status.disabled} Disabled (${reasonText})`);
-			}
-			case "shadowed":
-				return theme.fg("warning", `${theme.status.shadowed} Shadowed${shadowedBy ? ` by ${shadowedBy}` : ""}`);
+	#getStatusLines(ext: Extension): string[] {
+		if (ext.state === "shadowed") {
+			return [theme.fg("warning", `${theme.status.shadowed} Shadowed${ext.shadowedBy ? ` by ${ext.shadowedBy}` : ""}`)];
 		}
+
+		if (ext.state === "active" && !ext.isGlobalDisabled && !ext.isProjectDisabled) {
+			return [theme.fg("success", `${theme.status.enabled} Active`)];
+		}
+
+		// Show independent disable states (both can be true)
+		const parts: string[] = [];
+		if (ext.isGlobalDisabled) {
+			parts.push(theme.fg("error", `${theme.status.disabled} Disabled globally`));
+		}
+		if (ext.isProjectDisabled) {
+			parts.push(theme.fg("warning", `${theme.status.disabled} Disabled for this project`));
+		}
+		if (parts.length > 0) return parts;
+
+		// Provider disabled or other
+		if (ext.disabledReason === "provider-disabled") {
+			return [theme.fg("dim", `${theme.status.disabled} Disabled (provider disabled)`)];
+		}
+
+		return [theme.fg("dim", `${theme.status.disabled} Disabled`)];
 	}
 }

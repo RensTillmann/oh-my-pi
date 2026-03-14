@@ -216,7 +216,12 @@ export class ExtensionList implements Component {
 		const nameWidth = Math.min(24, width - 20);
 
 		// Origin badge: [G] for user-level (global), [L] for project-level (local)
-		const originBadge = ext.source.level === "project" ? theme.fg("muted", "[L]") : theme.fg("muted", "[G]");
+		let originBadge: string;
+		if (ext.source.level === "project") {
+			originBadge = ext.isProjectDisabled ? theme.fg("error", "[L]") : theme.fg("muted", "[L]");
+		} else {
+			originBadge = ext.isGlobalDisabled ? theme.fg("error", "[G]") : theme.fg("muted", "[G]");
+		}
 
 		// Build the line with indentation
 		let line = `   ${stateIcon} ${originBadge} `;
