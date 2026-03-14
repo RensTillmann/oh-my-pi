@@ -13,7 +13,7 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { $env, getAgentDbPath, getAgentDir, getProjectDir, logger, postmortem } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
 import { AsyncJobManager } from "./async";
-import { loadCapability } from "./capability";
+import { isExtensionDisabled, loadCapability } from "./capability";
 import { type Rule, ruleCapability } from "./capability/rule";
 import { ModelRegistry } from "./config/model-registry";
 import { formatModelString, parseModelPattern, parseModelString, resolveModelRoleValue } from "./config/model-resolver";
@@ -758,6 +758,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				options.rules !== undefined
 					? { items: options.rules, warnings: undefined }
 					: await loadCapability<Rule>(ruleCapability.id, { cwd });
+			rulesResult.items = rulesResult.items.filter(rule => !isExtensionDisabled(`rule:${rule.name}`));
 			const registeredTtsrRuleNames = new Set<string>();
 			for (const rule of rulesResult.items) {
 				if (rule.condition && rule.condition.length > 0) {

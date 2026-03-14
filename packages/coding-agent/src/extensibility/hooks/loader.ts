@@ -6,6 +6,7 @@ import * as piCodingAgent from "@oh-my-pi/pi-coding-agent";
 import { logger } from "@oh-my-pi/pi-utils";
 import * as typebox from "@sinclair/typebox";
 import { hookCapability } from "../../capability/hook";
+import { isExtensionDisabled } from "../../capability";
 import type { Hook } from "../../discovery";
 import { loadCapability } from "../../discovery";
 import type { HookMessage } from "../../session/messages";
@@ -247,7 +248,9 @@ export async function discoverAndLoadHooks(configuredPaths: string[], cwd: strin
 
 	// 1. Discover hooks via capability API
 	const discovered = await loadCapability<Hook>(hookCapability.id, { cwd });
-	addPaths(discovered.items.map(hook => hook.path));
+	addPaths(discovered.items
+		.filter(hook => !isExtensionDisabled(`hook:${hook.type}:${hook.tool}:${hook.name}`))
+		.map(hook => hook.path));
 
 	// 2. Explicitly configured paths (can override/add)
 	addPaths(configuredPaths.map(p => resolvePath(p, cwd)));
