@@ -3,6 +3,7 @@
  * Handles data loading, tree building, filtering, and toggle persistence.
  */
 import { logger } from "@oh-my-pi/pi-utils";
+import { parseFrontmatter } from "../../../utils/frontmatter";
 import type { ContextFile } from "../../../capability/context-file";
 import type { ExtensionModule } from "../../../capability/extension-module";
 import type { Hook } from "../../../capability/hook";
@@ -42,7 +43,12 @@ export interface ExtensionSettingsManager {
 /**
  * Load all extensions from all capabilities.
  */
-export async function loadAllExtensions(cwd?: string, disabledIds?: string[], projectDisabledIds?: string[]): Promise<Extension[]> {
+export async function loadAllExtensions(
+	cwd?: string,
+	disabledIds?: string[],
+	projectDisabledIds?: string[],
+	mcpManager?: { getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined },
+): Promise<Extension[]> {
 	const extensions: Extension[] = [];
 	const disabledExtensions = new Set<string>(disabledIds ?? []);
 	const projectDisabledExtensions = new Set<string>(projectDisabledIds ?? []);
@@ -196,7 +202,7 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[], pr
 				disableScope,
 				isGlobalDisabled: isDisabled,
 				isProjectDisabled: isProjectDisabled,
-				raw: server,
+				raw: { ...server, _instructions: mcpManager?.getConnection(server.name)?.instructions, _toolCount: mcpManager?.getConnection(server.name)?.tools?.length },
 			});
 		}
 	} catch (error) {
@@ -207,7 +213,10 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[], pr
 	try {
 		const prompts = await loadCapability<Prompt>("prompts", loadOpts);
 		addItems(prompts.all, "prompt", {
-			getDescription: () => undefined,
+			getDescription: p => {
+				const firstLine = p.content?.split("\n").find(l => l.trim());
+				return firstLine?.slice(0, 80) || undefined;
+			},
 			getTrigger: p => `/prompts:${p.name}`,
 		});
 	} catch (error) {
@@ -218,7 +227,14 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[], pr
 	try {
 		const commands = await loadCapability<SlashCommand>("slash-commands", loadOpts);
 		addItems(commands.all, "slash-command", {
-			getDescription: () => undefined,
+			getDescription: c => {
+				const { frontmatter } = parseFrontmatter(c.content, { source: c.path, level: "off" });
+				if (typeof frontmatter.description === "string" && frontmatter.description.trim()) {
+					return frontmatter.description.trim();
+				}
+				const firstLine = c.content.split("\n").find(l => l.trim() && !l.startsWith("---"));
+				return firstLine?.slice(0, 80) || undefined;
+			},
 			getTrigger: c => `/${c.name}`,
 		});
 	} catch (error) {
@@ -552,8 +568,13 @@ export function filterByProvider(extensions: Extension[], providerId: string): E
 /**
  * Create initial dashboard state.
  */
-export async function createInitialState(cwd?: string, disabledIds?: string[], projectDisabledIds?: string[]): Promise<DashboardState> {
-	const extensions = await loadAllExtensions(cwd, disabledIds, projectDisabledIds);
+export async function createInitialState(
+	cwd?: string,
+	disabledIds?: string[],
+	projectDisabledIds?: string[],
+	mcpManager?: { getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined },
+): Promise<DashboardState> {
+	const extensions = await loadAllExtensions(cwd, disabledIds, projectDisabledIds, mcpManager);
 	const tabs = buildProviderTabs(extensions);
 	const tabFiltered = extensions; // "all" tab by default
 	const searchFiltered = tabFiltered;
@@ -592,8 +613,9 @@ export async function refreshState(
 	cwd?: string,
 	disabledIds?: string[],
 	projectDisabledIds?: string[],
+	mcpManager?: { getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined },
 ): Promise<DashboardState> {
-	const extensions = await loadAllExtensions(cwd, disabledIds, projectDisabledIds);
+	const extensions = await loadAllExtensions(cwd, disabledIds, projectDisabledIds, mcpManager);
 	const tabs = buildProviderTabs(extensions);
 
 	// Get current provider from tabs

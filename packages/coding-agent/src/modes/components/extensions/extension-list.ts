@@ -23,8 +23,6 @@ export interface ExtensionListCallbacks {
 	onSelectionChange?: (extension: Extension | null) => void;
 	/** Called when extension is toggled (Space — context-aware) */
 	onToggle?: (extension: Extension, enabled: boolean) => void;
-	/** Called when extension is globally toggled */
-	onGlobalToggle?: (extensionId: string, enabled: boolean) => void;
 	/** Called when master switch is toggled */
 	onMasterToggle?: (providerId: string) => void;
 	/** Provider ID for master switch (null = no master switch) */
@@ -481,7 +479,7 @@ export class ExtensionList implements Component {
 					return;
 				}
 			}
-			// Space, Enter, Ctrl+G fall through to normal handlers
+			// Space, Enter fall through to normal handlers
 		}
 
 		// Normal mode
@@ -521,19 +519,6 @@ export class ExtensionList implements Component {
 			return;
 		}
 
-		// Ctrl+G: Global toggle (keep for keyboards that support it)
-		if (matchesKey(data, "ctrl+g")) {
-			const item = this.#listItems[this.#selectedIndex];
-			if (item?.type === "extension") {
-				const masterDisabled =
-					this.#masterSwitchProvider !== null && !isProviderEnabled(this.#masterSwitchProvider);
-				if (!masterDisabled) {
-					const newEnabled = item.item.state === "disabled";
-					this.callbacks.onGlobalToggle?.(item.item.id, newEnabled);
-				}
-			}
-			return;
-		}
 	}
 
 	#getExtensionsInCategory(headerIndex: number): Extension[] {
