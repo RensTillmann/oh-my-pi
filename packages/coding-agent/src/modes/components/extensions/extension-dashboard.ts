@@ -163,9 +163,13 @@ export class ExtensionDashboard extends Container {
 					lines.push(theme.fg("accent", ` Move "${mode.ext.displayName}" to:`));
 					for (let i = 0; i < mode.options.length; i++) {
 						const opt = mode.options[i];
-						const marker = i === mode.selectedIndex ? "\u25b8" : " ";
-						const text = ` ${marker} ${opt.label}`;
-						lines.push(i === mode.selectedIndex ? theme.fg("accent", text) : theme.fg("muted", text));
+						if (opt.current) {
+							lines.push(theme.fg("dim", `   ${opt.label} (current)`));
+						} else {
+							const marker = i === mode.selectedIndex ? "\u25b8" : " ";
+							const text = ` ${marker} ${opt.label}`;
+							lines.push(i === mode.selectedIndex ? theme.fg("accent", text) : theme.fg("muted", text));
+						}
 					}
 					lines.push(theme.fg("dim", " \u2191/\u2193: select  Enter: confirm  Esc: cancel"));
 					return lines.join("\n");
@@ -395,11 +399,17 @@ export class ExtensionDashboard extends Container {
 					this.#buildLayout();
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "up") || data === "k") {
-					mode.selectedIndex = (mode.selectedIndex - 1 + mode.options.length) % mode.options.length;
+					let next = mode.selectedIndex;
+					do { next = (next - 1 + mode.options.length) % mode.options.length; }
+					while (mode.options[next].current && next !== mode.selectedIndex);
+					mode.selectedIndex = next;
 					this.#buildLayout();
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "down") || data === "j") {
-					mode.selectedIndex = (mode.selectedIndex + 1) % mode.options.length;
+					let next = mode.selectedIndex;
+					do { next = (next + 1) % mode.options.length; }
+					while (mode.options[next].current && next !== mode.selectedIndex);
+					mode.selectedIndex = next;
 					this.#buildLayout();
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "return")) {
@@ -411,7 +421,7 @@ export class ExtensionDashboard extends Container {
 						};
 						this.#buildLayout();
 						this.onRequestRender?.();
-					} else if (selected) {
+					} else if (selected && !selected.current) {
 						void this.#executeAction();
 					}
 				}
@@ -592,7 +602,7 @@ export class ExtensionDashboard extends Container {
 						{ label: "Custom path...", provider: "", scope: "project", targetDir: "" },
 					];
 					this.#actionMode = {
-						type: "picker", action: "move", ext, options, selectedIndex: 0,
+					type: "picker", action: "move", ext, options, selectedIndex: options.findIndex(o => !o.current),
 					};
 					this.#buildLayout();
 				}
