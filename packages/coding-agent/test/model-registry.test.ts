@@ -25,6 +25,7 @@ describe("ModelRegistry", () => {
 	});
 
 	afterEach(() => {
+		authStorage.close();
 		if (tempDir && fs.existsSync(tempDir)) {
 			fs.rmSync(tempDir, { recursive: true });
 		}
@@ -183,6 +184,89 @@ describe("ModelRegistry", () => {
 			await registry.refresh("offline");
 
 			expect(getModelsForProvider(registry, "anthropic")[0].baseUrl).toBe("https://second-proxy.example.com/v1");
+		});
+	});
+
+	describe("provider compat overrides", () => {
+		test("provider-level compat applies to built-in models", () => {
+			writeRawModelsJson({
+				openrouter: {
+					compat: {
+						supportsUsageInStreaming: false,
+						supportsStrictMode: false,
+					},
+				},
+			});
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const models = getModelsForProvider(registry, "openrouter");
+			expect(models.length).toBeGreaterThan(0);
+			for (const model of models) {
+				expect(model.compat?.supportsUsageInStreaming).toBe(false);
+				expect(model.compat?.supportsStrictMode).toBe(false);
+			}
+		});
+
+		test("provider-level compat applies to custom models", () => {
+			writeRawModelsJson({
+				demo: {
+					baseUrl: "https://example.com/v1",
+					apiKey: "DEMO_KEY",
+					api: "openai-completions",
+					compat: {
+						supportsUsageInStreaming: false,
+						maxTokensField: "max_tokens",
+					},
+					models: [
+						{
+							id: "demo-model",
+							reasoning: false,
+							input: ["text"],
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+							contextWindow: 1000,
+							maxTokens: 100,
+						},
+					],
+				},
+			});
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const model = registry.find("demo", "demo-model");
+			expect(model?.compat?.supportsUsageInStreaming).toBe(false);
+			expect(model?.compat?.maxTokensField).toBe("max_tokens");
+		});
+
+		test("model-level compat overrides provider-level compat for custom models", () => {
+			writeRawModelsJson({
+				demo: {
+					baseUrl: "https://example.com/v1",
+					apiKey: "DEMO_KEY",
+					api: "openai-completions",
+					compat: {
+						supportsUsageInStreaming: false,
+						maxTokensField: "max_tokens",
+					},
+					models: [
+						{
+							id: "demo-model",
+							reasoning: false,
+							input: ["text"],
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+							contextWindow: 1000,
+							maxTokens: 100,
+							compat: {
+								supportsUsageInStreaming: true,
+								maxTokensField: "max_completion_tokens",
+							},
+						},
+					],
+				},
+			});
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const model = registry.find("demo", "demo-model");
+			expect(model?.compat?.supportsUsageInStreaming).toBe(true);
+			expect(model?.compat?.maxTokensField).toBe("max_completion_tokens");
 		});
 	});
 
@@ -471,6 +555,35 @@ describe("ModelRegistry", () => {
 
 			const compat = sonnet?.compat as OpenAICompat | undefined;
 			expect(compat?.openRouterRouting).toEqual({ order: ["anthropic", "together"] });
+		});
+
+		test("model override merges compat.extraBody across provider+model", () => {
+			writeRawModelsJson({
+				openrouter: {
+					compat: {
+						extraBody: {
+							gateway: "default-gateway",
+							controller: "provider-controller",
+						},
+					},
+					modelOverrides: {
+						"anthropic/claude-sonnet-4": {
+							compat: {
+								extraBody: {
+									controller: "model-controller",
+								},
+							},
+						},
+					},
+				},
+			});
+
+			const registry = new ModelRegistry(authStorage, modelsJsonPath);
+			const models = getModelsForProvider(registry, "openrouter");
+			const sonnet = models.find(m => m.id === "anthropic/claude-sonnet-4");
+
+			const compat = sonnet?.compat as OpenAICompat | undefined;
+			expect(compat?.extraBody).toEqual({ gateway: "default-gateway", controller: "model-controller" });
 		});
 
 		test("multiple model overrides on same provider", () => {

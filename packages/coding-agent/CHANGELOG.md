@@ -2,6 +2,63 @@
 
 ## [Unreleased]
 
+## [13.12.0] - 2026-03-14
+
+### Added
+
+- Added per-rule TTSR interrupt mode override via `interruptMode` field in rule frontmatter to allow fine-grained control over when TTSR interrupts stream processing
+- Added `task` model role to allow configuring a dedicated model for subtask execution via `modelRoles.task` setting
+- Added `moveCursorToMessageEnd` and `moveCursorToMessageStart` prompt actions to navigate to the beginning and end of the entire message
+- Added support for provider-level `compat` configuration to apply OpenAI compatibility settings across all models from a provider
+- Added `reasoningEffortMap` configuration option to map reasoning effort levels to provider-specific values
+- Added support for `supportsUsageInStreaming`, `requiresToolResultName`, `requiresAssistantAfterToolResult`, `requiresThinkingAsText`, `thinkingFormat`, and `supportsStrictMode` OpenAI compatibility options
+- Added support for provider-configurable `OpenAICompat.extraBody` to inject request-body fields for custom gateway/proxy routing
+- Added `close()` method to SessionManager for properly closing persistent writers after flushing pending data
+- Added `omp config init-xdg` command to initialize XDG Base Directory structure on Linux
+- Added `getHistoryDbPath()`, `getModelDbPath()`, `getMemoriesDir()`, `getTerminalSessionsDir()` path helpers
+
+### Changed
+
+- Path resolution on Linux redirects to XDG locations when `XDG_DATA_HOME` / `XDG_STATE_HOME` / `XDG_CACHE_HOME` environment variables are set
+
+### Changed
+
+- Changed TTSR interrupt logic to respect per-rule `interruptMode` settings, falling back to global `ttsr.interruptMode` when rule-level override is not specified
+- Reorganized settings tabs from 12 tabs (display, agent, input, tools, config, services, bash, lsp, ttsr, status) to 8 focused tabs (appearance, model, interaction, context, editing, tools, tasks, providers) for improved discoverability
+- Consolidated status line settings into the Appearance tab instead of a separate Status tab
+- Reorganized sampling parameters (temperature, topP, topK, minP, presencePenalty, repetitionPenalty) into the Model tab
+- Moved edit tool settings (mode, fuzzyMatch, fuzzyThreshold, streamingAbort) to the Editing tab
+- Moved read tool settings (readLineNumbers, readHashLines, read.defaultLimit) to the Editing tab
+- Moved LSP settings (lsp.enabled, lsp.formatOnWrite, lsp.diagnosticsOnWrite, lsp.diagnosticsOnEdit) to the Editing tab
+- Moved bash interceptor settings to the Editing tab
+- Moved Python settings (python.toolMode, python.kernelMode, python.sharedGateway) to the Editing tab
+- Moved task delegation settings (task.isolation.*, task.eager, task.maxConcurrency, task.maxRecursionDepth) to the Tasks tab
+- Moved skill and command settings to the Tasks tab
+- Moved provider selection settings (providers.webSearch, providers.codeSearch, providers.image, etc.) to the Providers tab
+- Moved Exa settings to the Providers tab
+- Moved secret handling settings to the Providers tab
+- Moved speech-to-text settings to the Interaction tab
+- Moved context promotion, compaction, branch summary, memories, and TTSR settings to the Context tab
+- Updated tab icon symbols across unicode, nerd, and ASCII presets to match new tab structure
+- Changed default agent model from `default` to `pi/task` to enable independent model configuration for subtasks
+- Changed agent model resolution to support single-pattern inheritance fallback, allowing `pi/task` agents to inherit the active session model when the task role is unconfigured
+- Changed system prompt to use ISO 8601 date format (YYYY-MM-DD) instead of locale-specific formatting
+- Changed system prompt template to use `{{date}}` instead of `{{dateTime}}` for current date display
+- Changed tool download timeout from 15 seconds to 120 seconds to accommodate slower network conditions
+- Changed working directory paths in system prompt to use forward slashes for consistency across platforms
+- Modified bash executor to fall back to one-shot shell execution after a persistent session hard timeout, preventing subsequent commands from hanging
+
+### Removed
+
+- Removed bash executor hard timeout recovery test file (functionality already documented in existing entries)
+
+### Fixed
+
+- Fixed bash execution to fall back to one-shot shell runs after a persistent session hard timeout, preventing later commands from hanging until restart
+- Fixed timeout handling in RpcClient to properly clear timeouts and prevent resource leaks
+- Fixed AgentSession disposal to call SessionManager's `close()` method when available, ensuring proper cleanup of persistent writers
+- Removed redundant `path.join()` call wrapping `getHistoryDbPath()` in history-storage.ts
+
 ## [13.11.1] - 2026-03-13
 
 ### Added
@@ -46,6 +103,7 @@
 - Added `buildNamedToolChoice` utility function to build provider-aware tool choice constraints for named tools
 - Support for comma/space-separated path lists in `find`, `grep`, `ast_grep`, and `ast_edit` tools (e.g., `apps/,packages/,phases/` or `apps/ packages/ phases/`)
 - New `resolveMultiSearchPath` and `resolveMultiFindPattern` functions to handle multi-path search inputs with automatic common base path detection
+- Added `display.showTokenUsage` setting to show per-turn token usage (input, output, cache) on assistant messages
 
 ### Changed
 

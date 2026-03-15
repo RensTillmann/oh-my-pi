@@ -24,6 +24,7 @@ describe("AgentSession newSession clears todo artifacts", () => {
 	let tempDir: string;
 	let session: AgentSession;
 	let sessionManager: SessionManager;
+	let authStorage: AuthStorage | undefined;
 
 	beforeEach(async () => {
 		tempDir = path.join(os.tmpdir(), `pi-new-session-todos-test-${Snowflake.next()}`);
@@ -31,7 +32,7 @@ describe("AgentSession newSession clears todo artifacts", () => {
 
 		sessionManager = SessionManager.create(tempDir);
 		const settings = Settings.isolated();
-		const authStorage = await AuthStorage.create(path.join(tempDir, "testauth.db"));
+		authStorage = await AuthStorage.create(path.join(tempDir, "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
 
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
@@ -69,8 +70,10 @@ describe("AgentSession newSession clears todo artifacts", () => {
 
 	afterEach(async () => {
 		if (session) {
-			session.dispose();
+			await session.dispose();
 		}
+		authStorage?.close();
+		authStorage = undefined;
 		if (tempDir && fs.existsSync(tempDir)) {
 			fs.rmSync(tempDir, { recursive: true });
 		}

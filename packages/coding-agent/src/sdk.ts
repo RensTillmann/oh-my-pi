@@ -227,17 +227,17 @@ export {
 	BashTool,
 	// Tool classes and factories
 	BUILTIN_TOOLS,
-	HIDDEN_TOOLS,
 	createTools,
 	EditTool,
 	FindTool,
 	GrepTool,
+	HIDDEN_TOOLS,
 	loadSshTool,
 	PythonTool,
 	ReadTool,
 	ResolveTool,
-	WriteTool,
 	type ToolSession,
+	WriteTool,
 };
 
 // Helper Functions
@@ -702,19 +702,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 	}
 
-	// For subagent sessions using GitHub Copilot, add X-Initiator header
-	// to ensure proper billing (agent-initiated vs user-initiated)
 	const taskDepth = options.taskDepth ?? 0;
-	const forceCopilotAgentInitiator = taskDepth > 0;
-	if (forceCopilotAgentInitiator && model?.provider === "github-copilot") {
-		model = {
-			...model,
-			headers: {
-				...model.headers,
-				"X-Initiator": "agent",
-			},
-		};
-	}
 
 	let thinkingLevel = options.thinkingLevel;
 
@@ -1340,6 +1328,16 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		if (!obfuscator?.hasSecrets()) return converted;
 		return obfuscateMessages(obfuscator, converted);
 	};
+	const transformContext = extensionRunner
+		? async (messages: AgentMessage[], _signal?: AbortSignal) => {
+				return await extensionRunner.emitContext(messages);
+			}
+		: undefined;
+	const onPayload = extensionRunner
+		? async (payload: unknown, _model?: Model) => {
+				return await extensionRunner.emitBeforeProviderRequest(payload);
+			}
+		: undefined;
 
 	const setToolUIContext = (uiContext: ExtensionUIContext, hasUI: boolean) => {
 		toolContextStore.setUIContext(uiContext, hasUI);
@@ -1362,17 +1360,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: initialTools,
 		},
 		convertToLlm: convertToLlmFinal,
-		onPayload: extensionRunner
-			? async (payload, _model) => {
-					return extensionRunner.emitBeforeProviderRequest(payload);
-				}
-			: undefined,
+		onPayload,
 		sessionId: sessionManager.getSessionId(),
-		transformContext: extensionRunner
-			? async messages => {
-					return extensionRunner.emitContext(messages);
-				}
-			: undefined,
+		transformContext,
 		steeringMode: settings.get("steeringMode") ?? "one-at-a-time",
 		followUpMode: settings.get("followUpMode") ?? "one-at-a-time",
 		interruptMode: settings.get("interruptMode") ?? "immediate",
@@ -1447,9 +1437,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		skillsSettings: settings.getGroup("skills") as Required<SkillsSettings>,
 		modelRegistry,
 		toolRegistry,
+		transformContext,
+		onPayload,
+		convertToLlm: convertToLlmFinal,
 		rebuildSystemPrompt,
 		ttsrManager,
-		forceCopilotAgentInitiator,
 		obfuscator,
 		asyncJobManager,
 		pendingActionStore,
