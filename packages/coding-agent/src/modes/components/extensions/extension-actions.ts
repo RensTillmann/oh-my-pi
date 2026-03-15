@@ -5,7 +5,7 @@ import { SOURCE_PATHS, type SourceId } from "../../../discovery/helpers";
 import type { Extension, ExtensionKind } from "./types";
 
 export interface ActionResult { ok: boolean; error?: string; }
-export interface MoveTarget { label: string; provider: string; scope: "user" | "project"; targetDir: string; }
+export interface MoveTarget { label: string; provider: string; scope: "user" | "project"; targetDir: string; current?: boolean; }
 
 const KIND_DIRS: Partial<Record<ExtensionKind, string>> = {
 	skill: "skills",
@@ -105,12 +105,14 @@ export function getMoveTargets(ext: Extension, cwd: string, homeDir: string): Mo
 		}
 	}
 
-	// Filter out current location
-	// Skills: ext.path is <parent>/skills/<name>/SKILL.md → current container is grandparent
+	// Mark current location instead of filtering it out
 	const currentDir = ext.kind === "skill"
 		? path.dirname(path.dirname(ext.path))
 		: path.dirname(ext.path);
-	return targets.filter(t => t.targetDir !== currentDir);
+	for (const t of targets) {
+		if (t.targetDir === currentDir) t.current = true;
+	}
+	return targets;
 }
 
 /**
