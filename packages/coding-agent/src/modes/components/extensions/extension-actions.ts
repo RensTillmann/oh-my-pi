@@ -258,12 +258,25 @@ export async function renameExtension(ext: Extension, newName: string): Promise<
 			return await renameMcpEntry(ext, newName);
 		}
 		// Skills live in directories (skills/<name>/SKILL.md).
-		// Rename the parent directory, not the file.
+		// Rename the parent directory and update frontmatter name.
 		if (ext.kind === "skill") {
 			const skillDir = path.dirname(ext.path);
 			const parentDir = path.dirname(skillDir);
 			const newDir = path.join(parentDir, newName);
 			await fs.rename(skillDir, newDir);
+
+			// Update frontmatter name field so discovery picks up the new name
+			const newSkillPath = path.join(newDir, path.basename(ext.path));
+			try {
+				const content = await fs.readFile(newSkillPath, "utf-8");
+				const updated = updateFrontmatterName(content, newName);
+				if (updated !== content) {
+					await fs.writeFile(newSkillPath, updated, "utf-8");
+				}
+			} catch {
+				// Directory renamed successfully; frontmatter update is best-effort
+			}
+
 			invalidate(skillDir);
 			invalidate(newDir);
 			return { ok: true };
@@ -306,4 +319,14 @@ async function renameMcpEntry(ext: Extension, newName: string): Promise<ActionRe
 	await fs.writeFile(ext.path, JSON.stringify(json, null, 2), "utf-8");
 	invalidate(ext.path);
 	return { ok: true };
+}
+
+/** Replace the `name:` field in YAML frontmatter (between --- delimiters). */
+function updateFrontmatterName(content: string, newName: string): string {
+	const match = content.match(/^---\n([\s\S]*?)\n---/);
+	if (!match) return content;
+	const frontmatter = match[1];
+	const updated = frontmatter.replace(/^name:\s*.+$/m, `name: ${newName}`);
+	if (updated === frontmatter) return content; // no name field found
+	return content.replace(match[0], `---\n${updated}\n---`);
 }
