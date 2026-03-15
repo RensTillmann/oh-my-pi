@@ -7,6 +7,7 @@ import type { SkillsSettings } from "../config/settings";
 import { type Skill as CapabilitySkill, loadCapability } from "../discovery";
 import { compareSkillOrder, scanSkillsFromDir } from "../discovery/helpers";
 import { expandTilde } from "../tools/path-utils";
+import { isExtensionDisabled } from "../capability";
 
 export interface Skill {
 	name: string;
@@ -125,6 +126,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 
 	// Filter skills by source and patterns first
 	const filteredSkills = result.items.filter(capSkill => {
+		if (isExtensionDisabled(`skill:${capSkill.name}`)) return false;
 		if (!isSourceEnabled(capSkill._source)) return false;
 		if (matchesIgnorePatterns(capSkill.name)) return false;
 		if (!matchesIncludePatterns(capSkill.name)) return false;
