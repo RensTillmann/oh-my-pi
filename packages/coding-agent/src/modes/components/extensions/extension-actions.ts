@@ -59,8 +59,11 @@ export async function deleteExtension(ext: Extension): Promise<ActionResult> {
 			} else {
 				await fs.unlink(ext.path);
 			}
+		} else if (ext.kind === "skill") {
+			// Skills are directories containing SKILL.md + supplementary files
+			const skillDir = path.dirname(ext.path);
+			await fs.rm(skillDir, { recursive: true, force: true });
 		} else {
-			// skill, rule, prompt, slash-command, instruction, hook, context-file
 			await fs.unlink(ext.path);
 		}
 
@@ -103,7 +106,10 @@ export function getMoveTargets(ext: Extension, cwd: string, homeDir: string): Mo
 	}
 
 	// Filter out current location
-	const currentDir = path.dirname(ext.path);
+	// Skills: ext.path is <parent>/skills/<name>/SKILL.md → current container is grandparent
+	const currentDir = ext.kind === "skill"
+		? path.dirname(path.dirname(ext.path))
+		: path.dirname(ext.path);
 	return targets.filter(t => t.targetDir !== currentDir);
 }
 
@@ -127,8 +133,28 @@ export async function moveExtension(ext: Extension, targetDir: string): Promise<
 		if (ext.kind === "mcp") {
 			return await moveMcpEntry(ext, targetDir);
 		}
+		// Skills live in directories — move the whole directory
+		if (ext.kind === "skill") {
+			const skillDir = path.dirname(ext.path);
+			const dirName = path.basename(skillDir);
+			const newPath = path.join(targetDir, dirName);
+			await fs.mkdir(targetDir, { recursive: true });
+			try {
+				await fs.rename(skillDir, newPath);
+			} catch (err: unknown) {
+				if ((err as NodeJS.ErrnoException).code === "EXDEV") {
+					await fs.cp(skillDir, newPath, { recursive: true });
+					await fs.rm(skillDir, { recursive: true, force: true });
+				} else {
+					throw err;
+				}
+			}
+			invalidate(skillDir);
+			invalidate(newPath);
+			return { ok: true };
+		}
 
-		// Ensure target directory exists
+		// File-based: move the single file
 		await fs.mkdir(targetDir, { recursive: true });
 		const basename = path.basename(ext.path);
 		const newPath = path.join(targetDir, basename);
@@ -136,19 +162,9 @@ export async function moveExtension(ext: Extension, targetDir: string): Promise<
 		try {
 			await fs.rename(ext.path, newPath);
 		} catch (err: unknown) {
-			// Cross-device move: copy + unlink
 			if ((err as NodeJS.ErrnoException).code === "EXDEV") {
-				const stat = await fs.stat(ext.path);
-				if (stat.isDirectory()) {
-					await fs.cp(ext.path, newPath, { recursive: true });
-				} else {
-					await fs.copyFile(ext.path, newPath);
-				}
-				if (stat.isDirectory()) {
-					await fs.rm(ext.path, { recursive: true, force: true });
-				} else {
-					await fs.unlink(ext.path);
-				}
+				await fs.copyFile(ext.path, newPath);
+				await fs.unlink(ext.path);
 			} else {
 				throw err;
 			}
@@ -241,21 +257,24 @@ export async function renameExtension(ext: Extension, newName: string): Promise<
 		if (ext.kind === "mcp") {
 			return await renameMcpEntry(ext, newName);
 		}
+		// Skills live in directories (skills/<name>/SKILL.md).
+		// Rename the parent directory, not the file.
+		if (ext.kind === "skill") {
+			const skillDir = path.dirname(ext.path);
+			const parentDir = path.dirname(skillDir);
+			const newDir = path.join(parentDir, newName);
+			await fs.rename(skillDir, newDir);
+			invalidate(skillDir);
+			invalidate(newDir);
+			return { ok: true };
+		}
 
 		// File-based: rename preserving extension
 		const dir = path.dirname(ext.path);
-		const stat = await fs.stat(ext.path);
-
-		let newPath: string;
-		if (stat.isDirectory()) {
-			newPath = path.join(dir, newName);
-		} else {
-			const extname = path.extname(ext.path);
-			// If newName already has the right extension, don't double it
-			newPath = newName.endsWith(extname)
-				? path.join(dir, newName)
-				: path.join(dir, newName + extname);
-		}
+		const extname = path.extname(ext.path);
+		const newPath = newName.endsWith(extname)
+			? path.join(dir, newName)
+			: path.join(dir, newName + extname);
 
 		await fs.rename(ext.path, newPath);
 		invalidate(ext.path);
