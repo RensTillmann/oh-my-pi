@@ -39,6 +39,7 @@ export class ExtensionDashboard extends Container {
 	#scrollStartTime = 0;
 	#lastScrollTime = 0;
 	#lastScrollDirection = 0;
+	#layoutMode: "vertical" | "horizontal" = "vertical";
 	#actionMode:
 		| null
 		| { type: "confirm"; action: "delete"; ext: Extension; message: string }
@@ -110,6 +111,8 @@ export class ExtensionDashboard extends Container {
 			this.#inspector.setExtension(this.#state.selected);
 		}
 
+		this.#layoutMode = (process.stdout.columns ?? 100) >= 120 ? "vertical" : "horizontal";
+
 		this.#buildLayout();
 	}
 
@@ -131,11 +134,16 @@ export class ExtensionDashboard extends Container {
 		this.addChild(new Text(this.#renderTabBar(), 0, 0));
 		this.addChild(new Spacer(1));
 
-		// 2-column body with height limit
-		// Reserve ~8 lines for header, tabs, help text, borders
+		// Layout body: vertical split or horizontal stack
 		const bodyMaxHeight = Math.max(5, this.terminalHeight - 8);
-		this.#inspector.setMaxHeight(bodyMaxHeight);
-		this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
+		if (this.#layoutMode === "horizontal") {
+			this.addChild(new SplitBody(this.#mainList, this.#inspector, bodyMaxHeight));
+		} else {
+			const maxVisible = Math.max(5, Math.floor((this.terminalHeight - 10) / 2));
+			this.#mainList.setMaxVisible(maxVisible);
+			this.#inspector.setMaxHeight(bodyMaxHeight);
+			this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
+		}
 
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(this.#renderHelpBar(), 0, 0));
@@ -168,7 +176,11 @@ export class ExtensionDashboard extends Container {
 				}
 			}
 		}
-		return theme.fg("dim", " \u2191/\u2193: navigate  \u2190/\u2192: category  Space: cycle  D: delete  M: move  N: rename  E: edit  R: restrict  Tab: provider  Esc: close");
+		const w = process.stdout.columns ?? 100;
+		if (w < 80) {
+			return theme.fg("dim", " \u2191\u2193 \u2190\u2192 Space D M N E R V Tab Esc");
+		}
+		return theme.fg("dim", " \u2191\u2193 navigate  \u2190\u2192 category  Space:cycle  D M N E R  V:layout  Tab  Esc");
 	}
 
 	#renderTabBar(): string {
@@ -537,6 +549,17 @@ export class ExtensionDashboard extends Container {
 			return;
 		}
 
+		// When search is active, single-letter keys are search input, not commands
+		if (this.#mainList.isSearchActive()) {
+			this.#mainList.handleInput(data);
+			const query = this.#mainList.getSearchQuery();
+			if (query !== this.#state.searchQuery) {
+				this.#state.searchQuery = query;
+				this.#state.searchFiltered = applyFilter(this.#state.tabFiltered, query);
+			}
+			return;
+		}
+
 		// R: Toggle project restriction
 		if (data === "r" || data === "R") {
 			const ext = this.#mainList.getSelectedExtension();
@@ -599,6 +622,14 @@ export class ExtensionDashboard extends Container {
 			return;
 		}
 
+		// V: Toggle layout (vertical split ↔ horizontal stack)
+		if (data === "v" || data === "V") {
+			this.#layoutMode = this.#layoutMode === "vertical" ? "horizontal" : "vertical";
+			this.#buildLayout();
+			this.onRequestRender?.();
+			return;
+		}
+
 		// All other input goes to the list
 		this.#mainList.handleInput(data);
 
@@ -646,5 +677,58 @@ class TwoColumnBody implements Component {
 	invalidate(): void {
 		this.leftPane.invalidate?.();
 		this.rightPane.invalidate?.();
+	}
+}
+
+/**
+ * Split body: two-column top section (list | inspector header),
+ * full-width inspector content below. Used on narrow terminals
+ * so preview/instruction text gets the full terminal width.
+ */
+class SplitBody implements Component {
+	constructor(
+		private readonly list: ExtensionList,
+		private readonly inspector: InspectorPanel,
+		private readonly maxHeight: number,
+	) {}
+
+	render(width: number): string[] {
+		const leftWidth = Math.floor(width * 0.5);
+		const rightWidth = Math.max(0, width - leftWidth - 3);
+
+		// Render header to determine top section height
+		const headerLines = this.inspector.renderHeader(rightWidth);
+		const topHeight = Math.max(headerLines.length, 8);
+
+		// Size list to fit top section (2 lines for search bar, 1 for scroll indicator)
+		this.list.setMaxVisible(Math.max(3, topHeight - 3));
+		const listLines = this.list.render(leftWidth);
+
+		const colSep = theme.fg("dim", ` ${theme.boxSharp.vertical} `);
+		const result: string[] = [];
+
+		for (let i = 0; i < topHeight; i++) {
+			const left = truncateToWidth(listLines[i] ?? "", leftWidth);
+			const leftPadded = left + padding(Math.max(0, leftWidth - visibleWidth(left)));
+			const right = truncateToWidth(headerLines[i] ?? "", rightWidth);
+			result.push(leftPadded + colSep + right);
+		}
+
+		// Horizontal divider
+		result.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
+
+		// Full-width content below
+		const contentBudget = Math.max(0, this.maxHeight - topHeight - 1);
+		const contentLines = this.inspector.renderContent(width, contentBudget);
+		for (const line of contentLines) {
+			result.push(truncateToWidth(line, width));
+		}
+
+		return result;
+	}
+
+	invalidate(): void {
+		this.list.invalidate?.();
+		this.inspector.invalidate?.();
 	}
 }

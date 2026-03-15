@@ -39,7 +39,8 @@ export class InspectorPanel implements Component {
 
 	invalidate(): void {}
 
-	render(width: number): string[] {
+	/** Header: name, status, action hints, description, origin. */
+	renderHeader(width: number): string[] {
 		if (!this.#extension) {
 			return [theme.fg("muted", "Select an extension"), theme.fg("dim", "to view details")];
 		}
@@ -58,13 +59,16 @@ export class InspectorPanel implements Component {
 			headerLines.push(`  ${statusParts[i]}`);
 		}
 
-		// Action hints
+		// Action hints — always show descriptions, wrap to two lines if needed
 		if (ext.source.level === "native") {
 			headerLines.push(theme.fg("dim", "  (native \u2014 read-only)"));
+		} else if (ext.kind === "context-file") {
+			headerLines.push(theme.fg("dim", "  D: delete  M: move  E: edit"));
+		} else if (width < 44) {
+			headerLines.push(theme.fg("dim", "  D: delete  M: move"));
+			headerLines.push(theme.fg("dim", "  N: rename  E: edit"));
 		} else {
-			const actions = ["D: delete", "M: move", "N: rename", "E: edit"];
-			if (ext.kind === "context-file") actions.splice(2, 1); // no rename for context files
-			headerLines.push(theme.fg("dim", `  ${actions.join("  ")}`));
+			headerLines.push(theme.fg("dim", "  D: delete  M: move  N: rename  E: edit"));
 		}
 		headerLines.push("");
 
@@ -94,13 +98,20 @@ export class InspectorPanel implements Component {
 		headerLines.push(`  ${theme.fg("dim", displayPath)}`);
 		headerLines.push("");
 
-		// Preview (scrollable)
+		return headerLines;
+	}
+
+	/** Scrollable preview/instruction content. */
+	renderContent(width: number, maxLines: number): string[] {
+		if (!this.#extension) return [];
+		const ext = this.#extension;
+
 		const previewLines = this.#renderPreview(ext, width);
 		this.#fullPreviewLength = previewLines.length;
-		this.#previewBudget = Math.max(0, this.#maxHeight - headerLines.length);
+		this.#previewBudget = maxLines;
 
-		const hasOverflow = previewLines.length > this.#previewBudget;
-		const visibleCount = hasOverflow ? Math.max(0, this.#previewBudget - 1) : this.#previewBudget;
+		const hasOverflow = previewLines.length > maxLines;
+		const visibleCount = hasOverflow ? Math.max(0, maxLines - 1) : maxLines;
 
 		// Clamp scroll offset
 		const maxOff = Math.max(0, previewLines.length - visibleCount);
@@ -111,14 +122,21 @@ export class InspectorPanel implements Component {
 			this.#previewScrollOffset + visibleCount,
 		);
 
-		const lines = [...headerLines, ...visiblePreview];
+		const lines = [...visiblePreview];
 
 		// Scroll hint
-		if (hasOverflow && this.#previewBudget > 0) {
+		if (hasOverflow && maxLines > 0) {
 			lines.push(theme.fg("dim", `(PgUp/PgDn to scroll \u2014 ${this.#previewScrollOffset + 1}/${previewLines.length})`));
 		}
 
 		return lines;
+	}
+
+	render(width: number): string[] {
+		const header = this.renderHeader(width);
+		const contentBudget = Math.max(0, this.#maxHeight - header.length);
+		const content = this.renderContent(width, contentBudget);
+		return [...header, ...content];
 	}
 
 	#renderPreview(ext: Extension, width: number): string[] {
