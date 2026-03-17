@@ -260,7 +260,6 @@ export class ExtensionList implements Component {
 		return truncateToWidth(line, width);
 	}
 
-
 	#getKindIcon(kind: ExtensionKind): string {
 		switch (kind) {
 			case "extension-module":
@@ -301,7 +300,6 @@ export class ExtensionList implements Component {
 				return theme.fg("warning", theme.status.shadowed);
 		}
 	}
-
 
 	#padText(text: string, targetWidth: number): string {
 		const width = visibleWidth(text);
@@ -488,8 +486,14 @@ export class ExtensionList implements Component {
 		// Normal mode
 
 		// j/k navigation
-		if (data === "k") { this.#moveSelectionUp(); return; }
-		if (data === "j") { this.#moveSelectionDown(); return; }
+		if (data === "k") {
+			this.#moveSelectionUp();
+			return;
+		}
+		if (data === "j") {
+			this.#moveSelectionDown();
+			return;
+		}
 
 		// / activates search
 		if (data === "/") {
@@ -506,8 +510,7 @@ export class ExtensionList implements Component {
 			if (item?.type === "master") {
 				this.callbacks.onMasterToggle?.(item.providerId);
 			} else if (item?.type === "kind-header") {
-				const eligible = this.#getExtensionsInCategory(this.#selectedIndex)
-					.filter(e => !e.isGlobalDisabled);
+				const eligible = this.#getExtensionsInCategory(this.#selectedIndex).filter(e => !e.isGlobalDisabled);
 				if (eligible.length > 0) {
 					this.callbacks.onCategoryToggle?.(eligible);
 				}
@@ -521,7 +524,6 @@ export class ExtensionList implements Component {
 			}
 			return;
 		}
-
 	}
 
 	#getExtensionsInCategory(headerIndex: number): Extension[] {

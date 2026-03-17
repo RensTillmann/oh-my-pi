@@ -452,7 +452,7 @@ export async function discoverAndLoadExtensions(
 	configuredPaths: string[],
 	cwd: string,
 	eventBus?: EventBus,
-	disabledExtensionIds: string[] = [],
+	_disabledExtensionIds: string[] = [],
 ): Promise<LoadExtensionsResult> {
 	const allPaths: string[] = [];
 	const seen = new Set<string>();

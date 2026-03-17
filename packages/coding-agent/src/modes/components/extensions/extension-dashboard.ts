@@ -22,15 +22,22 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
 import { Settings } from "../../../config/settings";
 import { DynamicBorder } from "../../../modes/components/dynamic-border";
 import { theme } from "../../../modes/theme/theme";
+import {
+	type ActionResult,
+	deleteExtension,
+	getMoveTargets,
+	type MoveTarget,
+	moveExtension,
+	renameExtension,
+} from "./extension-actions";
 import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import type { DashboardState, Extension } from "./types";
-import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
-import { deleteExtension, getMoveTargets, moveExtension, renameExtension, type ActionResult, type MoveTarget } from "./extension-actions";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -44,8 +51,8 @@ export class ExtensionDashboard extends Container {
 		| null
 		| { type: "confirm"; action: "delete"; ext: Extension; message: string }
 		| { type: "picker"; action: "move"; ext: Extension; options: MoveTarget[]; selectedIndex: number }
-		| { type: "input"; action: "rename" | "custom-path"; ext: Extension; buffer: string; placeholder?: string }
-		= null;
+		| { type: "input"; action: "rename" | "custom-path"; ext: Extension; buffer: string; placeholder?: string } =
+		null;
 
 	onClose?: () => void;
 	onOpenFile?: (path: string) => void;
@@ -55,7 +62,9 @@ export class ExtensionDashboard extends Container {
 		private readonly cwd: string,
 		private readonly settings: Settings | null,
 		private readonly terminalHeight: number,
-		private readonly mcpManager?: { getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined },
+		private readonly mcpManager?: {
+			getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined;
+		},
 	) {
 		super();
 	}
@@ -96,7 +105,7 @@ export class ExtensionDashboard extends Container {
 					this.#handleProviderToggle(providerId);
 				},
 				masterSwitchProvider: this.#getActiveProviderId(),
-				onCategoryToggle: (extensions) => {
+				onCategoryToggle: extensions => {
 					this.#handleCategoryToggle(extensions);
 				},
 			},
@@ -182,9 +191,9 @@ export class ExtensionDashboard extends Container {
 		}
 		const w = process.stdout.columns ?? 100;
 		if (w < 80) {
-			return theme.fg("dim", " \u2191\u2193 \u2190\u2192 Space D M N E R V Tab Esc");
+			return theme.fg("dim", " ↑↓ nav  ←→ cat  Space:cycle  R:restrict  V:layout  Esc");
 		}
-		return theme.fg("dim", " \u2191\u2193 navigate  \u2190\u2192 category  Space:cycle  D M N E R  V:layout  Tab  Esc");
+		return theme.fg("dim", " ↑↓ navigate  ←→ category  Space:cycle  R:restrict  V:layout  Tab  Esc");
 	}
 
 	#renderTabBar(): string {
@@ -226,7 +235,6 @@ export class ExtensionDashboard extends Container {
 		toggleProvider(providerId);
 		void this.#refreshFromState();
 	}
-
 
 	/**
 	 * Three-state cycle on Space: Disabled globally → Active → Disabled for project → repeat.
@@ -286,10 +294,7 @@ export class ExtensionDashboard extends Container {
 		}
 
 		sm.setProject("projectDisabledExtensions", projectDisabled);
-		setDisabledExtensions(
-			(sm.get("disabledExtensions") as string[]) ?? [],
-			projectDisabled,
-		);
+		setDisabledExtensions((sm.get("disabledExtensions") as string[]) ?? [], projectDisabled);
 		void this.#refreshFromState();
 	}
 
@@ -300,7 +305,7 @@ export class ExtensionDashboard extends Container {
 		const sm = this.settings ?? Settings.instance;
 		if (!sm) return;
 
-		const restrictions = ((sm.get("restrictedExtensions") as Record<string, string>) ?? {});
+		const restrictions = (sm.get("restrictedExtensions") as Record<string, string>) ?? {};
 		const updated = { ...restrictions };
 
 		if (ext.id in updated) {
@@ -315,7 +320,6 @@ export class ExtensionDashboard extends Container {
 		setRestrictedExtensions(updated, this.cwd);
 		void this.#refreshFromState();
 	}
-
 
 	async #refreshFromState(): Promise<void> {
 		// Remember current tab ID before refresh
@@ -400,15 +404,17 @@ export class ExtensionDashboard extends Container {
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "up") || data === "k") {
 					let next = mode.selectedIndex;
-					do { next = (next - 1 + mode.options.length) % mode.options.length; }
-					while (mode.options[next].current && next !== mode.selectedIndex);
+					do {
+						next = (next - 1 + mode.options.length) % mode.options.length;
+					} while (mode.options[next].current && next !== mode.selectedIndex);
 					mode.selectedIndex = next;
 					this.#buildLayout();
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "down") || data === "j") {
 					let next = mode.selectedIndex;
-					do { next = (next + 1) % mode.options.length; }
-					while (mode.options[next].current && next !== mode.selectedIndex);
+					do {
+						next = (next + 1) % mode.options.length;
+					} while (mode.options[next].current && next !== mode.selectedIndex);
 					mode.selectedIndex = next;
 					this.#buildLayout();
 					this.onRequestRender?.();
@@ -416,8 +422,11 @@ export class ExtensionDashboard extends Container {
 					const selected = mode.options[mode.selectedIndex];
 					if (selected && selected.label === "Custom path...") {
 						this.#actionMode = {
-							type: "input", action: "custom-path", ext: mode.ext,
-							buffer: "", placeholder: "Enter target directory path",
+							type: "input",
+							action: "custom-path",
+							ext: mode.ext,
+							buffer: "",
+							placeholder: "Enter target directory path",
 						};
 						this.#buildLayout();
 						this.onRequestRender?.();
@@ -461,9 +470,14 @@ export class ExtensionDashboard extends Container {
 				result = await deleteExtension(this.#actionMode.ext);
 				break;
 			case "move": {
-				const mode = this.#actionMode as { type: "picker"; options: MoveTarget[]; selectedIndex: number; ext: Extension };
+				const mode = this.#actionMode as {
+					type: "picker";
+					options: MoveTarget[];
+					selectedIndex: number;
+					ext: Extension;
+				};
 				const selected = mode.options[mode.selectedIndex];
-				if (selected && selected.targetDir) {
+				if (selected?.targetDir) {
 					result = await moveExtension(mode.ext, selected.targetDir);
 				}
 				break;
@@ -493,7 +507,6 @@ export class ExtensionDashboard extends Container {
 
 		await this.#refreshFromState();
 	}
-
 
 	handleInput(data: string): void {
 		// Action mode intercepts all input
@@ -582,7 +595,9 @@ export class ExtensionDashboard extends Container {
 			const ext = this.#mainList.getSelectedExtension();
 			if (ext && ext.source.level !== "native") {
 				this.#actionMode = {
-					type: "confirm", action: "delete", ext,
+					type: "confirm",
+					action: "delete",
+					ext,
 					message: `Delete ${ext.kind} "${ext.displayName}"?`,
 				};
 				this.#buildLayout();
@@ -602,7 +617,11 @@ export class ExtensionDashboard extends Container {
 						{ label: "Custom path...", provider: "", scope: "project", targetDir: "" },
 					];
 					this.#actionMode = {
-					type: "picker", action: "move", ext, options, selectedIndex: options.findIndex(o => !o.current),
+						type: "picker",
+						action: "move",
+						ext,
+						options,
+						selectedIndex: options.findIndex(o => !o.current),
 					};
 					this.#buildLayout();
 				}
@@ -624,7 +643,9 @@ export class ExtensionDashboard extends Container {
 			const ext = this.#mainList.getSelectedExtension();
 			if (ext && ext.source.level !== "native" && ext.kind !== "context-file") {
 				this.#actionMode = {
-					type: "input", action: "rename", ext,
+					type: "input",
+					action: "rename",
+					ext,
 					buffer: ext.name,
 				};
 				this.#buildLayout();
@@ -706,9 +727,10 @@ class SplitBody implements Component {
 		const leftWidth = Math.floor(width * 0.5);
 		const rightWidth = Math.max(0, width - leftWidth - 3);
 
-		// Render header to determine top section height
+		// Fixed top-section height derived from maxHeight only — must not depend on
+		// headerLines.length, which varies per item and causes the list to resize on selection change.
 		const headerLines = this.inspector.renderHeader(rightWidth);
-		const topHeight = Math.max(headerLines.length, 8);
+		const topHeight = Math.max(8, Math.floor(this.maxHeight * 0.45));
 
 		// Size list to fit top section (2 lines for search bar, 1 for scroll indicator)
 		this.list.setMaxVisible(Math.max(3, topHeight - 3));
@@ -725,7 +747,7 @@ class SplitBody implements Component {
 		}
 
 		// Horizontal divider
-		result.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
+		result.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(width)));
 
 		// Full-width content below
 		const contentBudget = Math.max(0, this.maxHeight - topHeight - 1);

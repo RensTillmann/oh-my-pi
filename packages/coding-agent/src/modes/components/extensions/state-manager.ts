@@ -4,7 +4,6 @@
  */
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
-import { parseFrontmatter } from "../../../utils/frontmatter";
 import type { ContextFile } from "../../../capability/context-file";
 import type { ExtensionModule } from "../../../capability/extension-module";
 import type { Hook } from "../../../capability/hook";
@@ -24,6 +23,7 @@ import {
 	isProviderEnabled,
 	loadCapability,
 } from "../../../discovery";
+import { parseFrontmatter } from "../../../utils/frontmatter";
 import type {
 	DashboardState,
 	Extension,
@@ -213,7 +213,11 @@ export async function loadAllExtensions(
 				isProjectDisabled: isProjectDisabled,
 				isRestricted: restricted,
 				restrictedToProject: restrictedTo,
-				raw: { ...server, _instructions: mcpManager?.getConnection(server.name)?.instructions, _toolCount: mcpManager?.getConnection(server.name)?.tools?.length },
+				raw: {
+					...server,
+					_instructions: mcpManager?.getConnection(server.name)?.instructions,
+					_toolCount: mcpManager?.getConnection(server.name)?.tools?.length,
+				},
 			});
 		}
 	} catch (error) {

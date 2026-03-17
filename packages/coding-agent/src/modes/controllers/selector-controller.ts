@@ -165,7 +165,12 @@ export class SelectorController {
 	 * Replaces /status with a unified view of all providers and extensions.
 	 */
 	async showExtensionsDashboard(): Promise<void> {
-		const dashboard = await ExtensionDashboard.create(getProjectDir(), this.ctx.settings, this.ctx.ui.terminal.rows, this.ctx.mcpManager);
+		const dashboard = await ExtensionDashboard.create(
+			getProjectDir(),
+			this.ctx.settings,
+			this.ctx.ui.terminal.rows,
+			this.ctx.mcpManager,
+		);
 		this.showSelector(done => {
 			dashboard.onClose = () => {
 				done();
@@ -174,7 +179,7 @@ export class SelectorController {
 			dashboard.onRequestRender = () => {
 				this.ctx.ui.requestRender();
 			};
-			dashboard.onOpenFile = (filePath) => {
+			dashboard.onOpenFile = filePath => {
 				done();
 				const editor = process.env.EDITOR || process.env.VISUAL;
 				if (editor) {
