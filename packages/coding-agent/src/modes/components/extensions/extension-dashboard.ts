@@ -148,7 +148,8 @@ export class ExtensionDashboard extends Container {
 		if (this.#layoutMode === "horizontal") {
 			this.addChild(new SplitBody(this.#mainList, this.#inspector, bodyMaxHeight));
 		} else {
-			const maxVisible = Math.max(5, Math.floor((this.terminalHeight - 10) / 2));
+			// Vertical layout: list uses full height (minus search bar + scroll indicator overhead)
+			const maxVisible = Math.max(5, bodyMaxHeight - 2);
 			this.#mainList.setMaxVisible(maxVisible);
 			this.#inspector.setMaxHeight(bodyMaxHeight);
 			this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
