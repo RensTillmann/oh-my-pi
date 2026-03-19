@@ -665,7 +665,7 @@ export class Settings {
 				setByPath(current, segments, value);
 			}
 
-			await Bun.write(configPath, JSON.stringify(current, null, 2) + "\n");
+			await Bun.write(configPath, `${JSON.stringify(current, null, 2)}\n`);
 		} catch (error) {
 			logger.warn("Settings: project save failed", { error: String(error) });
 			for (const p of modifiedPaths) {
