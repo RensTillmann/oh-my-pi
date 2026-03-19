@@ -140,9 +140,7 @@ export class InspectorPanel implements Component {
 
 		// Scroll hint
 		if (hasOverflow && maxLines > 0) {
-			lines.push(
-				theme.fg("dim", `(PgUp/PgDn to scroll — ${this.#previewScrollOffset + 1}/${previewLines.length})`),
-			);
+			lines.push(theme.fg("dim", `(PgUp/PgDn to scroll — ${this.#previewScrollOffset + 1}/${previewLines.length})`));
 		}
 
 		return lines;
