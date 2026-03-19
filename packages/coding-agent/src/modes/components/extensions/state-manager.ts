@@ -10,6 +10,7 @@ import type { ExtensionModule } from "../../../capability/extension-module";
 import type { Hook } from "../../../capability/hook";
 import type { MCPServer } from "../../../capability/mcp";
 import type { Prompt } from "../../../capability/prompt";
+import { isRestrictableExtensionKind } from "../../../capability/restrictions";
 import type { Rule } from "../../../capability/rule";
 import type { Skill } from "../../../capability/skill";
 import type { SlashCommand } from "../../../capability/slash-command";
@@ -73,8 +74,9 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (item as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(item._source.provider);
-			const restricted = isExtensionRestricted(id);
-			const restrictedTo = getExtensionRestriction(id);
+			const canRestrict = isRestrictableExtensionKind(kind);
+			const restricted = canRestrict ? isExtensionRestricted(id) : false;
+			const restrictedTo = canRestrict ? getExtensionRestriction(id) : undefined;
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -102,6 +104,7 @@ export async function loadAllExtensions(
 			extensions.push({
 				id,
 				kind,
+				canRestrict,
 				name: item.name,
 				displayName: item.name,
 				description: opts?.getDescription?.(item),
@@ -173,8 +176,9 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (server as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(server._source.provider);
-			const restricted = isExtensionRestricted(id);
-			const restrictedTo = getExtensionRestriction(id);
+			const canRestrict = isRestrictableExtensionKind("mcp");
+			const restricted = canRestrict ? isExtensionRestricted(id) : false;
+			const restrictedTo = canRestrict ? getExtensionRestriction(id) : undefined;
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -201,6 +205,7 @@ export async function loadAllExtensions(
 			extensions.push({
 				id,
 				kind: "mcp",
+				canRestrict,
 				name: server.name,
 				displayName: server.name,
 				description: server.command || server.url,
@@ -266,8 +271,9 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (hook as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(hook._source.provider);
-			const restricted = isExtensionRestricted(id);
-			const restrictedTo = getExtensionRestriction(id);
+			const canRestrict = isRestrictableExtensionKind("hook");
+			const restricted = canRestrict ? isExtensionRestricted(id) : false;
+			const restrictedTo = canRestrict ? getExtensionRestriction(id) : undefined;
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -294,6 +300,7 @@ export async function loadAllExtensions(
 			extensions.push({
 				id,
 				kind: "hook",
+				canRestrict,
 				name: hook.name,
 				displayName: hook.name,
 				description: `${hook.type}-${hook.tool}`,
@@ -325,8 +332,9 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (file as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(file._source.provider);
-			const restricted = isExtensionRestricted(id);
-			const restrictedTo = getExtensionRestriction(id);
+			const canRestrict = isRestrictableExtensionKind("context-file");
+			const restricted = canRestrict ? isExtensionRestricted(id) : false;
+			const restrictedTo = canRestrict ? getExtensionRestriction(id) : undefined;
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -353,6 +361,7 @@ export async function loadAllExtensions(
 			extensions.push({
 				id,
 				kind: "context-file",
+				canRestrict,
 				name,
 				displayName: name,
 				description: file.level === "user" ? "User-level context" : "Project-level context",

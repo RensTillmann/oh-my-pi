@@ -252,10 +252,12 @@ export class ExtensionDashboard extends Container {
 			}
 		}
 		const w = process.stdout.columns ?? 100;
+		const canRestrict = this.#state.selected?.canRestrict ?? false;
+		const restrictHint = canRestrict ? "  R:restrict" : "";
 		if (w < 80) {
-			return theme.fg("dim", " ↑↓ nav  ←→ cat  Space:cycle  R:restrict  V:layout  Esc");
+			return theme.fg("dim", ` ↑↓ nav  ←→ cat  Space:cycle${restrictHint}  V:layout  Esc`);
 		}
-		return theme.fg("dim", " ↑↓ navigate  ←→ category  Space:cycle  R:restrict  V:layout  Tab  Esc");
+		return theme.fg("dim", ` ↑↓ navigate  ←→ category  Space:cycle${restrictHint}  V:layout  Tab  Esc`);
 	}
 
 	#renderTabBar(): string {
@@ -364,6 +366,7 @@ export class ExtensionDashboard extends Container {
 	}
 
 	#handleRestrictionToggle(ext: Extension): void {
+		if (!ext.canRestrict) return;
 		// No-op if globally disabled
 		if (ext.isGlobalDisabled) return;
 
@@ -678,7 +681,7 @@ export class ExtensionDashboard extends Container {
 		// R: Toggle project restriction
 		if (data === "r" || data === "R") {
 			const ext = this.#mainList.getSelectedExtension();
-			if (ext) this.#handleRestrictionToggle(ext);
+			if (ext?.canRestrict) this.#handleRestrictionToggle(ext);
 			return;
 		}
 
