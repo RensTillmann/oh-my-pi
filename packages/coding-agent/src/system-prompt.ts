@@ -8,6 +8,7 @@ import * as path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { $env, getGpuCachePath, getProjectDir, hasFsCode, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
+import { isExtensionDisabled } from "./capability";
 import { contextFileCapability } from "./capability/context-file";
 import { systemPromptCapability } from "./capability/system-prompt";
 import { isExtensionDisabled } from "./capability";

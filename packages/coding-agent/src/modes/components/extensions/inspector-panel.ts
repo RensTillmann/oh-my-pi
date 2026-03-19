@@ -134,16 +134,13 @@ export class InspectorPanel implements Component {
 		const maxOff = Math.max(0, previewLines.length - visibleCount);
 		this.#previewScrollOffset = Math.min(this.#previewScrollOffset, maxOff);
 
-		const visiblePreview = previewLines.slice(
-			this.#previewScrollOffset,
-			this.#previewScrollOffset + visibleCount,
-		);
+		const visiblePreview = previewLines.slice(this.#previewScrollOffset, this.#previewScrollOffset + visibleCount);
 
 		const lines = [...visiblePreview];
 
 		// Scroll hint
 		if (hasOverflow && maxLines > 0) {
-			lines.push(theme.fg("dim", `(PgUp/PgDn to scroll \u2014 ${this.#previewScrollOffset + 1}/${previewLines.length})`));
+			lines.push(theme.fg("dim", `(PgUp/PgDn to scroll — ${this.#previewScrollOffset + 1}/${previewLines.length})`));
 		}
 
 		return lines;
@@ -207,7 +204,6 @@ export class InspectorPanel implements Component {
 			const highlighted = this.#highlightMarkdown(line);
 			lines.push(truncateToWidth(highlighted, width - 2));
 		}
-
 
 		lines.push("");
 		return lines;
@@ -300,7 +296,6 @@ export class InspectorPanel implements Component {
 				for (const line of instructionLines) {
 					lines.push(truncateToWidth(line, width - 2));
 				}
-
 			}
 		} catch {
 			lines.push(theme.fg("dim", "  (unable to parse skill content)"));
@@ -334,7 +329,6 @@ export class InspectorPanel implements Component {
 		lines.push("");
 		return lines;
 	}
-
 
 	#renderMcpDetails(raw: unknown, width: number): string[] {
 		const lines: string[] = [];
@@ -440,35 +434,33 @@ export class InspectorPanel implements Component {
 			return [theme.fg("warning", `${theme.status.disabled} File missing for ${scope}`)];
 		}
 		if (ext.state === "shadowed") {
-			return [theme.fg("warning", `${theme.status.shadowed} Shadowed${ext.shadowedBy ? ` by ${ext.shadowedBy}` : ""}`)];
+			return [
+				theme.fg("warning", `${theme.status.shadowed} Shadowed${ext.shadowedBy ? ` by ${ext.shadowedBy}` : ""}`),
+			];
 		}
+
+		const parts: string[] = [];
 
 		if (ext.state === "active" && !ext.isGlobalDisabled && !ext.isProjectDisabled) {
-			return [theme.fg("success", `${theme.status.enabled} Active`)];
+			parts.push(theme.fg("success", `${theme.status.enabled} Active`));
 		}
-
-		// Show independent disable states (both can be true)
-		const parts: string[] = [];
 		if (ext.isGlobalDisabled) {
 			parts.push(theme.fg("error", `${theme.status.disabled} Disabled globally`));
 		}
 		if (ext.isProjectDisabled) {
 			parts.push(theme.fg("warning", `${theme.status.disabled} Disabled for this project`));
 		}
-		if (parts.length > 0) return parts;
-
-		// Restriction status
 		if (ext.isRestricted && ext.restrictedToProject) {
 			if (ext.restrictedToProject === this.#projectPath) {
-				parts.push(theme.fg("accent", `${theme.status.enabled} Only this project`));
+				parts.push(theme.fg("warning", `${theme.status.restricted} Restricted to this project`));
 			} else {
 				const shortened = shortenPath(ext.restrictedToProject, os.homedir());
-				parts.push(theme.fg("dim", `${theme.status.disabled} Restricted to: ${shortened}`));
+				parts.push(theme.fg("warning", `${theme.status.restricted} Restricted to: ${shortened}`));
 			}
-			if (parts.length > 0) return parts;
 		}
 
-		// Provider disabled or other
+		if (parts.length > 0) return parts;
+
 		if (ext.disabledReason === "provider-disabled") {
 			return [theme.fg("dim", `${theme.status.disabled} Disabled (provider disabled)`)];
 		}

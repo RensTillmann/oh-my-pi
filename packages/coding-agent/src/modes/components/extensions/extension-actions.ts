@@ -4,8 +4,17 @@ import { invalidate } from "../../../capability";
 import { SOURCE_PATHS, type SourceId } from "../../../discovery/helpers";
 import type { Extension, ExtensionKind } from "./types";
 
-export interface ActionResult { ok: boolean; error?: string; }
-export interface MoveTarget { label: string; provider: string; scope: "user" | "project"; targetDir: string; current?: boolean; }
+export interface ActionResult {
+	ok: boolean;
+	error?: string;
+}
+export interface MoveTarget {
+	label: string;
+	provider: string;
+	scope: "user" | "project";
+	targetDir: string;
+	current?: boolean;
+}
 
 const KIND_DIRS: Partial<Record<ExtensionKind, string>> = {
 	skill: "skills",
@@ -82,33 +91,51 @@ export function getMoveTargets(ext: Extension, cwd: string, homeDir: string): Mo
 	const targets: MoveTarget[] = [];
 	const kindDir = KIND_DIRS[ext.kind];
 
-	for (const [providerId, paths] of Object.entries(SOURCE_PATHS) as [SourceId, typeof SOURCE_PATHS[SourceId]][]) {
+	for (const [providerId, paths] of Object.entries(SOURCE_PATHS) as [SourceId, (typeof SOURCE_PATHS)[SourceId]][]) {
 		if (ext.kind === "mcp") {
 			// MCP: target is the provider directory containing mcp.json
 			if (paths.projectDir) {
 				const targetDir = path.join(cwd, paths.projectDir);
-				targets.push({ label: `${providerId} Project (${paths.projectDir}/mcp.json)`, provider: providerId, scope: "project", targetDir });
+				targets.push({
+					label: `${providerId} Project (${paths.projectDir}/mcp.json)`,
+					provider: providerId,
+					scope: "project",
+					targetDir,
+				});
 			}
 			if (paths.userAgent) {
 				const targetDir = path.join(homeDir, paths.userAgent);
-				targets.push({ label: `${providerId} User (~/${paths.userAgent}/mcp.json)`, provider: providerId, scope: "user", targetDir });
+				targets.push({
+					label: `${providerId} User (~/${paths.userAgent}/mcp.json)`,
+					provider: providerId,
+					scope: "user",
+					targetDir,
+				});
 			}
 		} else if (kindDir) {
 			if (paths.projectDir) {
 				const targetDir = path.join(cwd, paths.projectDir, kindDir);
-				targets.push({ label: `${providerId} Project (${paths.projectDir}/${kindDir}/)`, provider: providerId, scope: "project", targetDir });
+				targets.push({
+					label: `${providerId} Project (${paths.projectDir}/${kindDir}/)`,
+					provider: providerId,
+					scope: "project",
+					targetDir,
+				});
 			}
 			if (paths.userAgent) {
 				const targetDir = path.join(homeDir, paths.userAgent, kindDir);
-				targets.push({ label: `${providerId} User (~/${paths.userAgent}/${kindDir}/)`, provider: providerId, scope: "user", targetDir });
+				targets.push({
+					label: `${providerId} User (~/${paths.userAgent}/${kindDir}/)`,
+					provider: providerId,
+					scope: "user",
+					targetDir,
+				});
 			}
 		}
 	}
 
 	// Mark current location instead of filtering it out
-	const currentDir = ext.kind === "skill"
-		? path.dirname(path.dirname(ext.path))
-		: path.dirname(ext.path);
+	const currentDir = ext.kind === "skill" ? path.dirname(path.dirname(ext.path)) : path.dirname(ext.path);
 	for (const t of targets) {
 		if (t.targetDir === currentDir) t.current = true;
 	}
@@ -287,9 +314,7 @@ export async function renameExtension(ext: Extension, newName: string): Promise<
 		// File-based: rename preserving extension
 		const dir = path.dirname(ext.path);
 		const extname = path.extname(ext.path);
-		const newPath = newName.endsWith(extname)
-			? path.join(dir, newName)
-			: path.join(dir, newName + extname);
+		const newPath = newName.endsWith(extname) ? path.join(dir, newName) : path.join(dir, newName + extname);
 
 		await fs.rename(ext.path, newPath);
 		invalidate(ext.path);

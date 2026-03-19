@@ -1,4 +1,5 @@
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
+import { isExtensionDisabled } from "../capability";
 import { slashCommandCapability } from "../capability/slash-command";
 import { isExtensionDisabled } from "../capability";
 import {
@@ -170,23 +171,23 @@ export async function loadSlashCommands(options: LoadSlashCommandsOptions = {}):
 	const fileCommands: FileSlashCommand[] = result.items
 		.filter(cmd => !isExtensionDisabled(`slash-command:${cmd.name}`))
 		.map(cmd => {
-		const { description, body } = parseCommandTemplate(cmd.content, {
-			source: cmd.path ?? `slash-command:${cmd.name}`,
-			level: cmd.level === "native" ? "fatal" : "warn",
+			const { description, body } = parseCommandTemplate(cmd.content, {
+				source: cmd.path ?? `slash-command:${cmd.name}`,
+				level: cmd.level === "native" ? "fatal" : "warn",
+			});
+
+			// Format source label: "via ProviderName Level"
+			const capitalizedLevel = cmd.level.charAt(0).toUpperCase() + cmd.level.slice(1);
+			const sourceStr = `via ${cmd._source.providerName} ${capitalizedLevel}`;
+
+			return {
+				name: cmd.name,
+				description,
+				content: body,
+				source: sourceStr,
+				_source: { providerName: cmd._source.providerName, level: cmd.level },
+			};
 		});
-
-		// Format source label: "via ProviderName Level"
-		const capitalizedLevel = cmd.level.charAt(0).toUpperCase() + cmd.level.slice(1);
-		const sourceStr = `via ${cmd._source.providerName} ${capitalizedLevel}`;
-
-		return {
-			name: cmd.name,
-			description,
-			content: body,
-			source: sourceStr,
-			_source: { providerName: cmd._source.providerName, level: cmd.level },
-		};
-	});
 
 	const seenNames = new Set(fileCommands.map(cmd => cmd.name));
 	for (const cmd of EMBEDDED_SLASH_COMMANDS) {

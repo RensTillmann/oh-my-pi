@@ -8,6 +8,7 @@ import * as path from "node:path";
 import * as piCodingAgent from "@oh-my-pi/pi-coding-agent";
 import { logger } from "@oh-my-pi/pi-utils";
 import * as typebox from "@sinclair/typebox";
+import { isExtensionDisabled } from "../../capability";
 import { toolCapability } from "../../capability/tool";
 import { isExtensionDisabled } from "../../capability";
 import { type CustomTool, loadCapability } from "../../discovery";

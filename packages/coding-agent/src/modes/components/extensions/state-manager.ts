@@ -25,6 +25,7 @@ import {
 	isProviderEnabled,
 	loadCapability,
 } from "../../../discovery";
+import { parseFrontmatter } from "../../../utils/frontmatter";
 import type {
 	DashboardState,
 	Extension,
@@ -214,7 +215,11 @@ export async function loadAllExtensions(
 				isProjectDisabled: isProjectDisabled,
 				isRestricted: restricted,
 				restrictedToProject: restrictedTo,
-				raw: { ...server, _instructions: mcpManager?.getConnection(server.name)?.instructions, _toolCount: mcpManager?.getConnection(server.name)?.tools?.length },
+				raw: {
+					...server,
+					_instructions: mcpManager?.getConnection(server.name)?.instructions,
+					_toolCount: mcpManager?.getConnection(server.name)?.tools?.length,
+				},
 			});
 		}
 	} catch (error) {

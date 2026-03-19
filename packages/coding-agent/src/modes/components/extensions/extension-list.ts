@@ -498,8 +498,14 @@ export class ExtensionList implements Component {
 		// Normal mode
 
 		// j/k navigation
-		if (data === "k") { this.#moveSelectionUp(); return; }
-		if (data === "j") { this.#moveSelectionDown(); return; }
+		if (data === "k") {
+			this.#moveSelectionUp();
+			return;
+		}
+		if (data === "j") {
+			this.#moveSelectionDown();
+			return;
+		}
 
 		// / activates search
 		if (data === "/") {
@@ -531,7 +537,6 @@ export class ExtensionList implements Component {
 			}
 			return;
 		}
-
 	}
 
 	#getExtensionsInCategory(headerIndex: number): Extension[] {
