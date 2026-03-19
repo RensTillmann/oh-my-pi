@@ -41,7 +41,8 @@ import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import { SystemPromptEditorBody } from "./system-prompt-editor";
-import { type DashboardState, type Extension, requiresRestartToTakeEffect } from "./types";
+import type { DashboardState, Extension } from "./types";
+import { requiresRestartToTakeEffect } from "./types";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -253,11 +254,11 @@ export class ExtensionDashboard extends Container {
 		}
 		const w = process.stdout.columns ?? 100;
 		const canRestrict = this.#state.selected?.canRestrict ?? false;
-		const restrictHint = canRestrict ? "  R:restrict" : "";
+		const restrictHint = canRestrict ? " R:restrict" : "";
 		if (w < 80) {
-			return theme.fg("dim", ` ↑↓ nav  ←→ cat  Space:cycle${restrictHint}  V:layout  Esc`);
+			return theme.fg("dim", ` ↑↓ ←→ Space D M N E${restrictHint} V Tab Esc`);
 		}
-		return theme.fg("dim", ` ↑↓ navigate  ←→ category  Space:cycle${restrictHint}  V:layout  Tab  Esc`);
+		return theme.fg("dim", ` ↑↓ navigate  ←→ category  Space:cycle  D M N E${restrictHint}  V:layout  Tab  Esc`);
 	}
 
 	#renderTabBar(): string {

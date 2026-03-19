@@ -262,6 +262,7 @@ export class ExtensionList implements Component {
 
 		return truncateToWidth(line, width);
 	}
+
 	#getKindIcon(kind: ExtensionKind): string {
 		switch (kind) {
 			case "extension-module":
@@ -306,6 +307,7 @@ export class ExtensionList implements Component {
 				return theme.fg("warning", theme.status.disabled);
 		}
 	}
+
 	#padText(text: string, targetWidth: number): string {
 		const width = visibleWidth(text);
 		if (width >= targetWidth) {

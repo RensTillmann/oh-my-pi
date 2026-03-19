@@ -391,8 +391,9 @@ export async function loadAllExtensions(
 			const isProjectDisabled = projectDisabledExtensions.has(id);
 			const isShadowed = (item as { _shadowed?: boolean })._shadowed;
 			const providerEnabled = isProviderEnabled(item._source.provider);
-			const restricted = isExtensionRestricted(id);
-			const restrictedTo = getExtensionRestriction(id);
+			const canRestrict = isRestrictableExtensionKind("append-system-prompt");
+			const restricted = canRestrict ? isExtensionRestricted(id) : false;
+			const restrictedTo = canRestrict ? getExtensionRestriction(id) : undefined;
 
 			let state: ExtensionState;
 			let disabledReason: Extension["disabledReason"];
@@ -424,6 +425,7 @@ export async function loadAllExtensions(
 			extensions.push({
 				id,
 				kind: "append-system-prompt",
+				canRestrict,
 				name,
 				displayName: "APPEND_SYSTEM.md",
 				description:
