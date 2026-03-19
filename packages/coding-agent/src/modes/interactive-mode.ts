@@ -2,6 +2,7 @@
  * Interactive mode for the coding agent.
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type Agent, type AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, UsageReport } from "@oh-my-pi/pi-ai";
@@ -893,9 +894,53 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.#isShuttingDown) return;
 		this.#isShuttingDown = true;
 
-		// Flush pending session writes before restart
-		await this.sessionManager.flush();
-		const sessionId = this.sessionManager.getSessionId();
+		let resumeArg: string | undefined;
+		try {
+			// Flush pending session writes before restart
+			await this.sessionManager.flush();
+			if (!this.sessionManager.isPersisted()) {
+				throw new Error("Reload requires a persisted session (disable --no-session).");
+			}
+			const sessionFile = this.sessionManager.getSessionFile();
+			if (!sessionFile) {
+				throw new Error("Reload requires a session file, but none was created yet.");
+			}
+			let hasSessionFile = true;
+			try {
+				await fs.stat(sessionFile);
+			} catch (err) {
+				if (isEnoent(err)) {
+					hasSessionFile = false;
+				} else {
+					throw err;
+				}
+			}
+			if (!hasSessionFile) {
+				await this.sessionManager.rewriteEntries();
+				try {
+					await fs.stat(sessionFile);
+					hasSessionFile = true;
+				} catch (err) {
+					if (!isEnoent(err)) {
+						throw err;
+					}
+				}
+			}
+			if (!hasSessionFile) {
+				throw new Error("Reload requires a persisted session file; unable to create it.");
+			}
+			resumeArg = sessionFile;
+		} catch (error) {
+			this.showError(`Failed to reload session: ${error instanceof Error ? error.message : String(error)}`);
+			this.#isShuttingDown = false;
+			return;
+		}
+
+		if (!resumeArg) {
+			this.showError("Failed to reload session: missing session file.");
+			this.#isShuttingDown = false;
+			return;
+		}
 
 		// Emit shutdown event to hooks
 		await this.session.dispose();
@@ -905,18 +950,21 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 
 		// Wait for any pending renders to complete
+		// requestRender() uses process.nextTick(), so we wait one tick
 		await new Promise(resolve => process.nextTick(resolve));
 
 		// Drain any in-flight Kitty key release events before stopping.
+		// This prevents escape sequences from leaking to the parent shell over slow SSH.
 		await this.ui.terminal.drainInput(1000);
 		this.stop();
 
 		// Re-exec the process, resuming the same session so history is preserved.
 		// We intentionally omit all other CLI flags (model, system prompt, etc.)
 		// because the resumed session already has that state persisted to disk.
+		// Use the session file path so custom session directories survive reloads.
 		const execPath = process.execPath;
 		const scriptPath = process.argv[1];
-		const resumeArgs = sessionId ? ["--resume", sessionId] : [];
+		const resumeArgs = ["--resume", resumeArg];
 
 		process.stderr.write(`\n${chalk.dim("Reloading...")}\n`);
 
