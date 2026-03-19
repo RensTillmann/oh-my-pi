@@ -256,9 +256,9 @@ export class ExtensionDashboard extends Container {
 		const canRestrict = this.#state.selected?.canRestrict ?? false;
 		const restrictHint = canRestrict ? " R:restrict" : "";
 		if (w < 80) {
-			return theme.fg("dim", ` ↑↓ ←→ Space D M N E${restrictHint} V Tab Esc`);
+			return theme.fg("dim", ` ↑↓ ←→ Space${restrictHint} V Tab Esc`);
 		}
-		return theme.fg("dim", ` ↑↓ navigate  ←→ category  Space:cycle  D M N E${restrictHint}  V:layout  Tab  Esc`);
+		return theme.fg("dim", ` ↑↓ navigate  ←→ category  Space:cycle${restrictHint}  V:layout  Tab  Esc`);
 	}
 
 	#renderTabBar(): string {
