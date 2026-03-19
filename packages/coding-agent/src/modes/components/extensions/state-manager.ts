@@ -488,8 +488,8 @@ export function buildSidebarTree(extensions: Extension[]): TreeNode[] {
 				});
 			}
 
-			// Sort kind nodes by count (most items first)
-			kindNodes.sort((a, b) => (b.count || 0) - (a.count || 0));
+			// Sort kind nodes by count (fewest items first for discoverability)
+			kindNodes.sort((a, b) => (a.count || 0) - (b.count || 0));
 		}
 
 		tree.push({
@@ -632,6 +632,8 @@ export function buildProviderTabs(extensions: Extension[]): ProviderTab[] {
 	tabs.sort((a, b) => {
 		if (a.id === "all") return -1;
 		if (b.id === "all") return 1;
+		if (a.id === "system-prompt") return -1; // Prompt always 2nd
+		if (b.id === "system-prompt") return 1;
 
 		// Sort providers: enabled with content, disabled, empty
 		const category = (t: ProviderTab) => {
