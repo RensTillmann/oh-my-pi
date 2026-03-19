@@ -211,13 +211,16 @@ export class ExtensionList implements Component {
 
 	#renderExtensionRow(ext: Extension, isSelected: boolean, width: number, masterDisabled: boolean): string {
 		// When master is disabled, all items appear dimmed
-		const effectivelyDisabled = masterDisabled || ext.state === "disabled";
+		const effectivelyDisabled = masterDisabled || ext.state === "disabled" || ext.state === "missing";
 
 		// Status icon
 		const stateIcon = this.#getStateIcon(ext.state, masterDisabled);
 
 		// Name
 		let name = ext.displayName;
+		if (ext.state === "missing") {
+			name = theme.strikethrough(name);
+		}
 		const nameWidth = Math.min(24, width - 20);
 
 		// Origin badge: color reflects disable state across both scopes
@@ -281,6 +284,8 @@ export class ExtensionList implements Component {
 				return theme.icon.extensionPrompt;
 			case "context-file":
 				return theme.icon.extensionContextFile;
+			case "append-system-prompt":
+				return theme.icon.extensionPrompt;
 			case "instruction":
 				return theme.icon.extensionInstruction;
 			default:
@@ -299,6 +304,8 @@ export class ExtensionList implements Component {
 				return theme.fg("dim", theme.status.disabled);
 			case "shadowed":
 				return theme.fg("warning", theme.status.shadowed);
+			case "missing":
+				return theme.fg("warning", theme.status.disabled);
 		}
 	}
 
@@ -361,6 +368,7 @@ export class ExtensionList implements Component {
 			"hook",
 			"prompt",
 			"context-file",
+			"append-system-prompt",
 			"instruction",
 		];
 
@@ -404,6 +412,8 @@ export class ExtensionList implements Component {
 				return "Prompts";
 			case "context-file":
 				return "Context";
+			case "append-system-prompt":
+				return "System Prompt";
 			case "instruction":
 				return "Instructions";
 			default:
@@ -514,7 +524,7 @@ export class ExtensionList implements Component {
 			} else if (item?.type === "extension") {
 				const masterDisabled =
 					this.#masterSwitchProvider !== null && !isProviderEnabled(this.#masterSwitchProvider);
-				if (!masterDisabled) {
+				if (!masterDisabled && item.item.state !== "missing") {
 					const newEnabled = item.item.state === "disabled";
 					this.callbacks.onToggle?.(item.item, newEnabled);
 				}

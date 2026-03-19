@@ -12,6 +12,7 @@
  * - Esc: Close dashboard (clears search first if active)
  */
 import * as os from "node:os";
+import * as path from "node:path";
 import {
 	type Component,
 	Container,
@@ -19,23 +20,29 @@ import {
 	padding,
 	Spacer,
 	Text,
+	type TUI,
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import { CONFIG_DIR_NAME, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { Settings } from "../../../config/settings";
 import { DynamicBorder } from "../../../modes/components/dynamic-border";
 import { theme } from "../../../modes/theme/theme";
 import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
+import { SystemPromptEditorBody } from "./system-prompt-editor";
 import type { DashboardState, Extension } from "./types";
 import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
 import { deleteExtension, getMoveTargets, moveExtension, renameExtension, type ActionResult, type MoveTarget } from "./extension-actions";
+import { requiresRestartToTakeEffect } from "./types";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
 	#mainList!: ExtensionList;
 	#inspector!: InspectorPanel;
+	#systemPromptEditor: SystemPromptEditorBody | null = null;
+	#tui: TUI | null = null;
 	#scrollStartTime = 0;
 	#lastScrollTime = 0;
 	#lastScrollDirection = 0;
@@ -50,14 +57,17 @@ export class ExtensionDashboard extends Container {
 	onClose?: () => void;
 	onOpenFile?: (path: string) => void;
 	onRequestRender?: () => void;
-
 	private constructor(
 		private readonly cwd: string,
 		private readonly settings: Settings | null,
 		private readonly terminalHeight: number,
-		private readonly mcpManager?: { getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined },
+		private readonly mcpManager?: {
+			getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined;
+		},
+		tui?: TUI,
 	) {
 		super();
+		this.#tui = tui ?? null;
 	}
 
 	static async create(
@@ -65,8 +75,15 @@ export class ExtensionDashboard extends Container {
 		settings: Settings | null = null,
 		terminalHeight?: number,
 		mcpManager?: { getConnection(name: string): { instructions?: string; tools?: { name: string }[] } | undefined },
+		tui?: TUI,
 	): Promise<ExtensionDashboard> {
-		const dashboard = new ExtensionDashboard(cwd, settings, terminalHeight ?? process.stdout.rows ?? 24, mcpManager);
+		const dashboard = new ExtensionDashboard(
+			cwd,
+			settings,
+			terminalHeight ?? process.stdout.rows ?? 24,
+			mcpManager,
+			tui,
+		);
 		await dashboard.#init();
 		return dashboard;
 	}
@@ -113,6 +130,44 @@ export class ExtensionDashboard extends Container {
 
 		this.#layoutMode = (process.stdout.columns ?? 100) >= 120 ? "vertical" : "horizontal";
 
+		// Load project APPEND_SYSTEM.md and detect SYSTEM.md for the Prompt tab editor
+		if (this.#tui) {
+			const appendSystemPath = path.join(this.cwd, CONFIG_DIR_NAME, "APPEND_SYSTEM.md");
+			const systemMdPath = path.join(this.cwd, CONFIG_DIR_NAME, "SYSTEM.md");
+			let content = "";
+			let fileExists = false;
+			let systemMdExists = false;
+			try {
+				content = await Bun.file(appendSystemPath).text();
+				fileExists = true;
+			} catch (err) {
+				if (!isEnoent(err)) {
+					logger.warn("Failed to read APPEND_SYSTEM.md", { path: appendSystemPath, error: String(err) });
+				}
+				// file does not exist or unreadable - continue with defaults
+			}
+			try {
+				await Bun.file(systemMdPath).text();
+				systemMdExists = true;
+			} catch (err) {
+				if (!isEnoent(err)) {
+					logger.warn("Failed to read SYSTEM.md", { path: systemMdPath, error: String(err) });
+				}
+				// not present or unreadable - continue with defaults
+			}
+			this.#systemPromptEditor = new SystemPromptEditorBody(
+				this.#tui,
+				this.cwd,
+				content,
+				fileExists,
+				systemMdExists,
+			);
+			this.#systemPromptEditor.onInvalidate = () => {
+				this.#buildLayout();
+				this.onRequestRender?.();
+			};
+		}
+
 		this.#buildLayout();
 	}
 
@@ -134,9 +189,12 @@ export class ExtensionDashboard extends Container {
 		this.addChild(new Text(this.#renderTabBar(), 0, 0));
 		this.addChild(new Spacer(1));
 
-		// Layout body: vertical split or horizontal stack
+		// Layout body: system-prompt tab gets a full-width editor; others get the standard split
 		const bodyMaxHeight = Math.max(5, this.terminalHeight - 8);
-		if (this.#layoutMode === "horizontal") {
+		const activeTab = this.#state.tabs[this.#state.activeTabIndex];
+		if (activeTab?.id === "system-prompt" && this.#systemPromptEditor) {
+			this.addChild(this.#systemPromptEditor);
+		} else if (this.#layoutMode === "horizontal") {
 			this.addChild(new SplitBody(this.#mainList, this.#inspector, bodyMaxHeight));
 		} else {
 			const maxVisible = Math.max(5, Math.floor((this.terminalHeight - 10) / 2));
@@ -153,6 +211,12 @@ export class ExtensionDashboard extends Container {
 	}
 
 	#renderHelpBar(): string {
+		// System-prompt tab: delegate help text to the editor
+		const activeTab = this.#state.tabs[this.#state.activeTabIndex];
+		if (activeTab?.id === "system-prompt" && this.#systemPromptEditor) {
+			return this.#systemPromptEditor.getHelpText();
+		}
+
 		if (this.#actionMode) {
 			switch (this.#actionMode.type) {
 				case "confirm":
@@ -266,6 +330,9 @@ export class ExtensionDashboard extends Container {
 			(sm.getProject("projectDisabledExtensions") as string[] | undefined) ?? [],
 		);
 		void this.#refreshFromState();
+		if (requiresRestartToTakeEffect(ext.kind)) {
+			this.#inspector.setShowRestartHint(true);
+		}
 	}
 
 	#handleCategoryToggle(extensions: Extension[]): void {
@@ -354,7 +421,7 @@ export class ExtensionDashboard extends Container {
 		for (let i = 0; i < numTabs; i++) {
 			nextIndex = (nextIndex + direction + numTabs) % numTabs;
 			const tab = this.#state.tabs[nextIndex];
-			const isEmptyEnabled = tab.count === 0 && tab.enabled && tab.id !== "all";
+			const isEmptyEnabled = tab.count === 0 && tab.enabled && tab.id !== "all" && tab.id !== "system-prompt";
 			if (!isEmptyEnabled) break;
 		}
 		this.#state.activeTabIndex = nextIndex;
@@ -502,6 +569,33 @@ export class ExtensionDashboard extends Container {
 			return;
 		}
 
+		// System-prompt tab: most input goes to the editor.
+		// Tab, Shift+Tab, and Esc switch tab only while in view mode (not while editing).
+		const activeTab = this.#state.tabs[this.#state.activeTabIndex];
+		if (activeTab?.id === "system-prompt" && this.#systemPromptEditor) {
+			const isViewing = this.#systemPromptEditor.mode === "viewing";
+			if (isViewing && matchesKey(data, "ctrl+c")) {
+				this.onClose?.();
+				return;
+			}
+			if (isViewing && matchesKey(data, "shift+tab")) {
+				this.#switchTab(-1);
+				return;
+			}
+			if (isViewing && matchesKey(data, "tab")) {
+				this.#switchTab(1);
+				return;
+			}
+			if (isViewing && (matchesKey(data, "escape") || matchesKey(data, "esc"))) {
+				this.#switchTab(-1);
+				return;
+			}
+			this.#systemPromptEditor.handleInput(data);
+			this.#buildLayout();
+			this.onRequestRender?.();
+			return;
+		}
+
 		// Ctrl+C - close immediately
 		if (matchesKey(data, "ctrl+c")) {
 			this.onClose?.();
@@ -615,6 +709,9 @@ export class ExtensionDashboard extends Container {
 			const ext = this.#mainList.getSelectedExtension();
 			if (ext) {
 				this.onOpenFile?.(ext.path);
+				if (requiresRestartToTakeEffect(ext.kind)) {
+					this.#inspector.setShowRestartHint(true);
+				}
 			}
 			return;
 		}

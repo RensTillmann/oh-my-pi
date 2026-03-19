@@ -6,6 +6,7 @@
 import * as path from "node:path";
 import { logger, tryParseJson } from "@oh-my-pi/pi-utils";
 import { registerProvider } from "../capability";
+import { type AppendSystemPrompt, appendSystemPromptCapability } from "../capability/append-system-prompt";
 import { type ContextFile, contextFileCapability } from "../capability/context-file";
 import { type Extension, type ExtensionManifest, extensionCapability } from "../capability/extension";
 import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
@@ -259,6 +260,46 @@ registerProvider<SystemPrompt>(systemPromptCapability.id, {
 	description: "Custom system prompt from SYSTEM.md",
 	priority: PRIORITY,
 	load: loadSystemPrompt,
+});
+
+// Append System Prompt (APPEND_SYSTEM.md)
+async function loadAppendSystemPrompt(ctx: LoadContext): Promise<LoadResult<AppendSystemPrompt>> {
+	const items: AppendSystemPrompt[] = [];
+
+	// User entry: always emitted; marked missing when file doesn't exist.
+	const userPath = path.join(ctx.home, PATHS.userAgent, "APPEND_SYSTEM.md");
+	const userContent = await readFile(userPath);
+	items.push({
+		path: userPath,
+		content: userContent ?? "",
+		level: "user",
+		...(userContent === null ? { missing: true } : {}),
+		_source: createSourceMeta(PROVIDER_ID, userPath, "user"),
+	});
+
+	// Project entry: only emitted when a nearest .omp/ dir exists; marked missing when file absent.
+	const nearestProjectConfigDir = await findNearestProjectConfigDir(ctx.cwd, ctx.repoRoot);
+	if (nearestProjectConfigDir) {
+		const projectPath = path.join(nearestProjectConfigDir.dir, "APPEND_SYSTEM.md");
+		const projectContent = await readFile(projectPath);
+		items.push({
+			path: projectPath,
+			content: projectContent ?? "",
+			level: "project",
+			...(projectContent === null ? { missing: true } : {}),
+			_source: createSourceMeta(PROVIDER_ID, projectPath, "project"),
+		});
+	}
+
+	return { items, warnings: [] };
+}
+
+registerProvider<AppendSystemPrompt>(appendSystemPromptCapability.id, {
+	id: PROVIDER_ID,
+	displayName: DISPLAY_NAME,
+	description: "Custom system prompt append from APPEND_SYSTEM.md",
+	priority: PRIORITY,
+	load: loadAppendSystemPrompt,
 });
 
 // Skills

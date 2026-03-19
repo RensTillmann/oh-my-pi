@@ -15,13 +15,14 @@ export type ExtensionKind =
 	| "prompt"
 	| "instruction"
 	| "context-file"
+	| "append-system-prompt"
 	| "hook"
 	| "slash-command";
 
 /**
- * Extension state (active, disabled, or shadowed).
+ * Extension state (active, disabled, shadowed, or missing — file absent on disk).
  */
-export type ExtensionState = "active" | "disabled" | "shadowed";
+export type ExtensionState = "active" | "disabled" | "shadowed" | "missing";
 
 /**
  * Reason why an extension is disabled.
@@ -198,4 +199,23 @@ export function sourceFromMeta(meta: SourceMeta): Extension["source"] {
 		providerName: meta.providerName,
 		level: meta.level,
 	};
+}
+
+/**
+ * Extension kinds whose toggle/edit only takes effect on the next session start.
+ * Loaded once during session init; not re-checked at runtime.
+ * Skills excluded: they call isExtensionDisabled() dynamically per invocation.
+ */
+export function requiresRestartToTakeEffect(kind: ExtensionKind): boolean {
+	switch (kind) {
+		case "context-file":
+		case "append-system-prompt":
+		case "rule":
+		case "mcp":
+		case "hook":
+		case "extension-module":
+			return true;
+		default:
+			return false;
+	}
 }
