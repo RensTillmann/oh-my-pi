@@ -4,6 +4,7 @@
  */
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
+import type { AppendSystemPrompt } from "../../../capability/append-system-prompt";
 import type { ContextFile } from "../../../capability/context-file";
 import type { ExtensionModule } from "../../../capability/extension-module";
 import type { Hook } from "../../../capability/hook";
@@ -371,6 +372,71 @@ export async function loadAllExtensions(
 	} catch (error) {
 		logger.warn("Failed to load context-files capability", { error: String(error) });
 	}
+	// Load append-system-prompt items
+	try {
+		const appendItems = await loadCapability<AppendSystemPrompt>("append-system-prompt", loadOpts);
+		for (const item of appendItems.all) {
+			const name = `${item.level}:APPEND_SYSTEM.md`;
+			const id = makeExtensionId("append-system-prompt", name);
+			const isDisabled = disabledExtensions.has(id);
+			const isProjectDisabled = projectDisabledExtensions.has(id);
+			const isShadowed = (item as { _shadowed?: boolean })._shadowed;
+			const providerEnabled = isProviderEnabled(item._source.provider);
+			const restricted = isExtensionRestricted(id);
+			const restrictedTo = getExtensionRestriction(id);
+
+			let state: ExtensionState;
+			let disabledReason: Extension["disabledReason"];
+			let disableScope: Extension["disableScope"];
+
+			// Missing files shown as "missing" regardless of disabled/shadowed flags.
+			if ((item as AppendSystemPrompt).missing) {
+				state = "missing";
+				disabledReason = undefined;
+				disableScope = undefined;
+			} else if (isProjectDisabled) {
+				state = "disabled";
+				disabledReason = "item-disabled-project";
+				disableScope = "project";
+			} else if (isDisabled) {
+				state = "disabled";
+				disabledReason = "item-disabled";
+				disableScope = "global";
+			} else if (isShadowed) {
+				state = "shadowed";
+				disabledReason = "shadowed";
+			} else if (!providerEnabled) {
+				state = "disabled";
+				disabledReason = "provider-disabled";
+			} else {
+				state = "active";
+			}
+
+			extensions.push({
+				id,
+				kind: "append-system-prompt",
+				name,
+				displayName: "APPEND_SYSTEM.md",
+				description:
+					item.level === "user"
+						? "Appended to system prompt for all projects"
+						: "Appended to system prompt for this project",
+				trigger: item.level,
+				path: item.path,
+				source: sourceFromMeta(item._source),
+				state,
+				disabledReason,
+				disableScope,
+				isGlobalDisabled: isDisabled,
+				isProjectDisabled,
+				isRestricted: restricted,
+				restrictedToProject: restrictedTo,
+				raw: item,
+			});
+		}
+	} catch (error) {
+		logger.warn("Failed to load append-system-prompt capability", { error: String(error) });
+	}
 
 	return extensions;
 }
@@ -512,6 +578,8 @@ function getKindDisplayName(kind: ExtensionKind): string {
 			return "Instructions";
 		case "context-file":
 			return "Context Files";
+		case "append-system-prompt":
+			return "System Prompt";
 		case "hook":
 			return "Hooks";
 		case "slash-command":
@@ -555,16 +623,22 @@ export function buildProviderTabs(extensions: Extension[]): ProviderTab[] {
 		});
 	}
 
-	// Sort: ALL first, then enabled by count, then disabled by count, then empty
+	// System prompt tab — appears 2nd after ALL
+	const promptCount = extensions.filter(ext => ext.kind === "append-system-prompt").length;
+	tabs.push({ id: "system-prompt", label: "APPEND_SYSTEM.md", enabled: true, count: promptCount });
+
+	// Sort: ALL first, Prompt 2nd, then providers by activity
 	tabs.sort((a, b) => {
 		if (a.id === "all") return -1;
 		if (b.id === "all") return 1;
+		if (a.id === "system-prompt") return -1; // Prompt always 2nd
+		if (b.id === "system-prompt") return 1;
 
-		// Categorize: 0 = enabled with content, 1 = disabled, 2 = empty+enabled
+		// Then sort providers: enabled with content, disabled, empty
 		const category = (t: ProviderTab) => {
-			if (t.count === 0 && t.enabled) return 2; // empty
-			if (!t.enabled) return 1; // disabled
-			return 0; // enabled with content
+			if (!t.enabled) return 2;
+			if (t.count === 0) return 3;
+			return 0;
 		};
 
 		const aCat = category(a);

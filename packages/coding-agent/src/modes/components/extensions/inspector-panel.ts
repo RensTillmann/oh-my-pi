@@ -8,6 +8,7 @@ import { type Component, truncateToWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-
 import { theme } from "../../../modes/theme/theme";
 import { shortenPath } from "../../../tools/render-utils";
 import type { Extension } from "./types";
+import { requiresRestartToTakeEffect } from "./types";
 
 export class InspectorPanel implements Component {
 	#extension: Extension | null = null;
@@ -16,10 +17,16 @@ export class InspectorPanel implements Component {
 	#previewBudget = 0;
 	#fullPreviewLength = 0;
 	#projectPath: string | null = null;
+	#showRestartHint = false;
 
 	setExtension(extension: Extension | null): void {
 		this.#extension = extension;
 		this.#previewScrollOffset = 0;
+		this.#showRestartHint = false;
+	}
+
+	setShowRestartHint(show: boolean): void {
+		this.#showRestartHint = show;
 	}
 
 	setMaxHeight(h: number): void {
@@ -62,6 +69,12 @@ export class InspectorPanel implements Component {
 		// Action hints — always show descriptions, wrap to two lines if needed
 		if (ext.source.level === "native") {
 			headerLines.push(theme.fg("dim", "  (native \u2014 read-only)"));
+		} else if (ext.state === "missing") {
+			// File absent: E opens editor which will create it
+			headerLines.push(theme.fg("dim", "  E: create"));
+		} else if (ext.kind === "append-system-prompt") {
+			// Fixed canonical path: no move or rename
+			headerLines.push(theme.fg("dim", "  D: delete  E: edit"));
 		} else if (ext.kind === "context-file") {
 			headerLines.push(theme.fg("dim", "  D: delete  M: move  E: edit"));
 		} else if (width < 44) {
@@ -69,6 +82,10 @@ export class InspectorPanel implements Component {
 			headerLines.push(theme.fg("dim", "  N: rename  E: edit"));
 		} else {
 			headerLines.push(theme.fg("dim", "  D: delete  M: move  N: rename  E: edit"));
+		}
+		// Dynamic restart hint: shown only after a create/edit/toggle action
+		if (this.#showRestartHint && requiresRestartToTakeEffect(ext.kind) && ext.state !== "missing") {
+			headerLines.push(theme.fg("dim", "  Restart session for changes to take effect"));
 		}
 		headerLines.push("");
 
@@ -144,6 +161,7 @@ export class InspectorPanel implements Component {
 
 		switch (ext.kind) {
 			case "context-file":
+			case "append-system-prompt":
 				content = this.#renderFilePreview(ext.raw, width);
 				break;
 			case "tool":
@@ -178,7 +196,7 @@ export class InspectorPanel implements Component {
 
 		const content = this.#getContextFileContent(raw);
 		if (!content) {
-			lines.push(theme.fg("dim", "  (no content)"));
+			lines.push(theme.fg("dim", "  (no content — press E to edit)"));
 			lines.push("");
 			return lines;
 		}
@@ -298,7 +316,7 @@ export class InspectorPanel implements Component {
 			raw && typeof raw === "object" && "content" in raw ? (raw as { content?: string }).content : undefined;
 
 		if (!content) {
-			lines.push(theme.fg("dim", "  (no content)"));
+			lines.push(theme.fg("dim", "  (no content — press E to edit)"));
 			lines.push("");
 			return lines;
 		}
@@ -402,6 +420,7 @@ export class InspectorPanel implements Component {
 			prompt: "muted",
 			hook: "warning",
 			"context-file": "dim",
+			"append-system-prompt": "dim",
 			instruction: "muted",
 			"slash-command": "accent",
 		};
@@ -411,6 +430,10 @@ export class InspectorPanel implements Component {
 	}
 
 	#getStatusLines(ext: Extension): string[] {
+		if (ext.state === "missing") {
+			const scope = ext.source.level === "user" ? "user" : "project";
+			return [theme.fg("warning", `${theme.status.disabled} File missing for ${scope}`)];
+		}
 		if (ext.state === "shadowed") {
 			return [
 				theme.fg("warning", `${theme.status.shadowed} Shadowed${ext.shadowedBy ? ` by ${ext.shadowedBy}` : ""}`),

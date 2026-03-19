@@ -21,7 +21,7 @@ import { findConfigFile } from "./config";
 import { ModelRegistry, ModelsConfigFile } from "./config/model-registry";
 import { resolveCliModel, resolveModelRoleValue, resolveModelScope, type ScopedModel } from "./config/model-resolver";
 import { Settings, settings } from "./config/settings";
-import { initializeWithSettings } from "./discovery";
+import { initializeWithSettings, isExtensionDisabled } from "./discovery";
 import { exportFromFile } from "./export/html";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes";
@@ -337,12 +337,14 @@ function discoverSystemPromptFile(): string | undefined {
 
 /** Discover APPEND_SYSTEM.md file if no CLI append system prompt was provided */
 function discoverAppendSystemPromptFile(): string | undefined {
+	// Project-level takes precedence; skip if disabled for this project
 	const projectPath = findConfigFile("APPEND_SYSTEM.md", { user: false });
-	if (projectPath) {
+	if (projectPath && !isExtensionDisabled("append-system-prompt:project:APPEND_SYSTEM.md")) {
 		return projectPath;
 	}
+	// Fall back to global; skip if disabled globally
 	const globalPath = findConfigFile("APPEND_SYSTEM.md", { user: true });
-	if (globalPath) {
+	if (globalPath && !isExtensionDisabled("append-system-prompt:user:APPEND_SYSTEM.md")) {
 		return globalPath;
 	}
 	return undefined;

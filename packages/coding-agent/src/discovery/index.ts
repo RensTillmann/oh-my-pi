@@ -17,6 +17,7 @@ import "../capability/settings";
 import "../capability/skill";
 import "../capability/slash-command";
 import "../capability/ssh";
+import "../capability/append-system-prompt";
 import "../capability/system-prompt";
 import "../capability/tool";
 // Import providers (each registers itself on import)
@@ -53,6 +54,7 @@ export {
 	// Initialization
 	initializeWithSettings,
 	invalidate,
+	isExtensionDisabled,
 	isExtensionRestricted,
 	isProviderEnabled,
 	listCapabilities,
@@ -63,6 +65,8 @@ export {
 	setDisabledProviders,
 	setRestrictedExtensions,
 } from "../capability";
+// Re-export types
+export type { AppendSystemPrompt } from "../capability/append-system-prompt";
 export type { ContextFile } from "../capability/context-file";
 export type { Extension, ExtensionManifest } from "../capability/extension";
 export type { ExtensionModule } from "../capability/extension-module";
@@ -78,5 +82,4 @@ export type { SlashCommand } from "../capability/slash-command";
 export type { SSHHost } from "../capability/ssh";
 export type { SystemPrompt } from "../capability/system-prompt";
 export type { CustomTool } from "../capability/tool";
-// Re-export types
 export type * from "../capability/types";

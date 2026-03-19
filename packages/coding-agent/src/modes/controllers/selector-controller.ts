@@ -1,8 +1,9 @@
+import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getOAuthProviders, type OAuthProvider } from "@oh-my-pi/pi-ai";
-import type { Component } from "@oh-my-pi/pi-tui";
+import type { Component, SelectItem } from "@oh-my-pi/pi-tui";
 import { Input, Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
-import { getAgentDbPath, getProjectDir } from "@oh-my-pi/pi-utils";
+import { getAgentDbPath, getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { MODEL_ROLES } from "../../config/model-registry";
 import { settings } from "../../config/settings";
 import { DebugSelectorComponent } from "../../debug";
@@ -25,9 +26,12 @@ import {
 	setPreferredImageProvider,
 	setPreferredSearchProvider,
 } from "../../tools";
+import { getEditorCommand } from "../../utils/external-editor";
 import { AgentDashboard } from "../components/agent-dashboard";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { ExtensionDashboard } from "../components/extensions";
+import { ExtensionEditorOptionPicker } from "../components/extensions/editor-open-picker";
+import { InlineFileEditorComponent } from "../components/extensions/inline-file-editor";
 import { HistorySearchComponent } from "../components/history-search";
 import { ModelSelectorComponent } from "../components/model-selector";
 import { OAuthSelectorComponent } from "../components/oauth-selector";
@@ -46,6 +50,7 @@ const CALLBACK_SERVER_PROVIDERS = new Set<OAuthProvider>([
 ]);
 
 const MANUAL_LOGIN_TIP = "Tip: You can complete pairing with /login <redirect URL>.";
+const COMMON_EDITOR_COMMANDS = ["nano", "nvim", "vim", "vi", "micro", "hx", "emacs", "code", "zed"];
 
 export class SelectorController {
 	constructor(private ctx: InteractiveModeContext) {}
@@ -170,6 +175,7 @@ export class SelectorController {
 			this.ctx.settings,
 			this.ctx.ui.terminal.rows,
 			this.ctx.mcpManager,
+			this.ctx.ui,
 		);
 		this.showSelector(done => {
 			dashboard.onClose = () => {
@@ -181,16 +187,153 @@ export class SelectorController {
 			};
 			dashboard.onOpenFile = filePath => {
 				done();
-				const editor = process.env.EDITOR || process.env.VISUAL;
-				if (editor) {
-					Bun.spawn([editor, filePath], { stdio: ["inherit", "inherit", "inherit"] });
-				} else {
-					this.ctx.editor.setText(`@${filePath} `);
-				}
-				this.ctx.ui.requestRender();
+				this.#showEditorOptionPicker(filePath);
 			};
 			return { component: dashboard, focus: dashboard };
 		});
+	}
+
+	#showEditorOptionPicker(filePath: string): void {
+		const { options, initialIndex } = this.#buildEditorOptions();
+		this.showSelector(done => {
+			const picker = new ExtensionEditorOptionPicker(
+				filePath,
+				options,
+				initialIndex,
+				action => {
+					done();
+					if (action === "inline") {
+						void this.#showInlineFileEditor(filePath);
+						return;
+					}
+					if (action === "ai") {
+						this.#prefillAiCreatePrompt(filePath);
+						return;
+					}
+					if (action.startsWith("external:")) {
+						void this.#openFileInExternalEditor(filePath, action.slice("external:".length));
+					}
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+			);
+			return { component: picker, focus: picker.getSelectList() };
+		});
+	}
+
+	#buildEditorOptions(): { options: SelectItem[]; initialIndex: number } {
+		const options: SelectItem[] = [
+			{
+				value: "inline",
+				label: "inline",
+				description: "Edit file in built-in textarea (Esc -> [S]ave/[C]ancel)",
+			},
+			{
+				value: "ai",
+				label: "create with AI",
+				description: "Prefill composer with a file-targeted prompt",
+			},
+		];
+
+		const seen = new Set<string>();
+		const configuredEditor = getEditorCommand()?.trim();
+		if (configuredEditor) {
+			seen.add(configuredEditor);
+			options.push({
+				value: `external:${configuredEditor}`,
+				label: configuredEditor,
+				description: "Configured via $VISUAL/$EDITOR",
+			});
+		}
+
+		for (const command of COMMON_EDITOR_COMMANDS) {
+			if (!Bun.which(command) || seen.has(command)) continue;
+			seen.add(command);
+			options.push({
+				value: `external:${command}`,
+				label: command,
+				description: "Open file in external editor",
+			});
+		}
+
+		const preferredValue = configuredEditor ? `external:${configuredEditor}` : "inline";
+		const initialIndex = options.findIndex(option => option.value === preferredValue);
+		return { options, initialIndex: initialIndex >= 0 ? initialIndex : 0 };
+	}
+
+	#prefillAiCreatePrompt(filePath: string): void {
+		const aiPrompt = `${path.basename(filePath) === "APPEND_SYSTEM.md" ? "Create a system prompt" : "Create content"}, at file path: @${filePath}`;
+		this.ctx.editor.setText(`${aiPrompt} `);
+		this.ctx.ui.requestRender();
+	}
+
+	async #showInlineFileEditor(filePath: string): Promise<void> {
+		let initialContent = "";
+		try {
+			initialContent = await Bun.file(filePath).text();
+		} catch (error) {
+			if (!isEnoent(error)) {
+				this.ctx.showError(`Failed to open file: ${String(error)}`);
+				this.ctx.ui.requestRender();
+				return;
+			}
+		}
+
+		this.showSelector(done => {
+			const inlineEditor = new InlineFileEditorComponent(
+				filePath,
+				initialContent,
+				async content => {
+					await Bun.write(filePath, content);
+					done();
+					this.ctx.showStatus(`Saved ${path.basename(filePath)}`);
+					this.ctx.ui.requestRender();
+				},
+				() => {
+					done();
+					this.ctx.ui.requestRender();
+				},
+			);
+			return { component: inlineEditor, focus: inlineEditor };
+		});
+	}
+
+	async #openFileInExternalEditor(filePath: string, editorCommand: string): Promise<void> {
+		const [editor, ...editorArgs] = editorCommand.split(" ").filter(Boolean);
+		if (!editor) {
+			this.ctx.showWarning("No editor configured. Set $VISUAL or $EDITOR environment variable.");
+			this.ctx.ui.requestRender();
+			return;
+		}
+
+		let startUi = false;
+		let openError: string | null = null;
+		let exitCode = 0;
+		try {
+			this.ctx.ui.stop();
+			startUi = true;
+			const proc = Bun.spawn([editor, ...editorArgs, filePath], { stdio: ["inherit", "inherit", "inherit"] });
+			exitCode = await proc.exited;
+		} catch (error) {
+			openError = error instanceof Error ? error.message : String(error);
+		} finally {
+			if (startUi) {
+				this.ctx.ui.start();
+				this.ctx.ui.requestRender(true);
+			} else {
+				this.ctx.ui.requestRender();
+			}
+		}
+
+		if (openError) {
+			this.ctx.showWarning(`Failed to open external editor: ${openError}`);
+			return;
+		}
+		if (exitCode !== 0) {
+			this.ctx.showWarning(`Editor exited with code ${exitCode}`);
+		}
 	}
 
 	/**
