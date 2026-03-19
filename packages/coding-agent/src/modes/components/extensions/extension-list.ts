@@ -226,7 +226,7 @@ export class ExtensionList implements Component {
 		const originBadge = theme.fg(badgeColor, badgeLabel);
 
 		// Restriction badge
-		const restrictBadge = ext.isRestricted ? ` ${theme.fg("accent", "[R]")}` : "";
+		const restrictBadge = ext.canRestrict && ext.isRestricted ? ` ${theme.fg("accent", "[R]")}` : "";
 
 		// Build the line with indentation
 		let line = `   ${stateIcon} ${originBadge}${restrictBadge} `;

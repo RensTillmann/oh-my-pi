@@ -430,7 +430,7 @@ export class InspectorPanel implements Component {
 		}
 
 		// Restriction status - always check regardless of disabled state
-		if (ext.isRestricted && ext.restrictedToProject) {
+		if (ext.canRestrict && ext.isRestricted && ext.restrictedToProject) {
 			if (ext.restrictedToProject === this.#projectPath) {
 				parts.push(theme.fg("warning", `${theme.status.restricted} Restricted to this project`));
 			} else {

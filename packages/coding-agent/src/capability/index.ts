@@ -12,6 +12,7 @@ import { getProjectDir, logger } from "@oh-my-pi/pi-utils";
 
 import type { Settings } from "../config/settings";
 import { clearCache as clearFsCache, findRepoRoot, cacheStats as fsCacheStats, invalidate as invalidateFs } from "./fs";
+import { filterRestrictableExtensions } from "./restrictions";
 import type {
 	Capability,
 	CapabilityInfo,
@@ -272,8 +273,12 @@ export function initializeWithSettings(activeSettings: Settings, cwd?: string): 
 	setDisabledExtensions(globalDisabled, projectDisabled);
 	// Load restricted extensions from global settings
 	const restrictions = (settings.get("restrictedExtensions") as Record<string, string>) ?? {};
+	const filteredRestrictions = filterRestrictableExtensions(restrictions);
+	if (Object.keys(filteredRestrictions).length !== Object.keys(restrictions).length) {
+		settings.set("restrictedExtensions", filteredRestrictions);
+	}
 	const projectPath = cwd ?? process.cwd();
-	setRestrictedExtensions(restrictions, projectPath);
+	setRestrictedExtensions(filteredRestrictions, projectPath);
 }
 
 /**

@@ -37,6 +37,8 @@ export interface Extension {
 	id: string;
 	/** Extension kind */
 	kind: ExtensionKind;
+	/** Whether this extension kind supports restriction */
+	canRestrict: boolean;
 	/** Extension name */
 	name: string;
 	/** Display name (may differ from name) */
