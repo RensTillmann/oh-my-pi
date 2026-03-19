@@ -1,13 +1,13 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { getProjectDir } from "@oh-my-pi/pi-utils";
+import { isExtensionDisabled } from "../capability";
 import { skillCapability } from "../capability/skill";
 import type { SourceMeta } from "../capability/types";
 import type { SkillsSettings } from "../config/settings";
 import { type Skill as CapabilitySkill, loadCapability } from "../discovery";
 import { compareSkillOrder, scanSkillsFromDir } from "../discovery/helpers";
 import { expandTilde } from "../tools/path-utils";
-import { isExtensionDisabled } from "../capability";
 
 export interface Skill {
 	name: string;

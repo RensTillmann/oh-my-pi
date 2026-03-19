@@ -229,7 +229,7 @@ export class ExtensionList implements Component {
 		const originBadge = theme.fg(badgeColor, badgeLabel);
 
 		// Restriction badge
-		const restrictBadge = ext.isRestricted ? ` ${theme.fg("accent", "[R]")}` : "";
+		const restrictBadge = ext.canRestrict && ext.isRestricted ? ` ${theme.fg("accent", "[R]")}` : "";
 
 		// Build the line with indentation
 		let line = `   ${stateIcon} ${originBadge}${restrictBadge} `;
@@ -262,7 +262,6 @@ export class ExtensionList implements Component {
 
 		return truncateToWidth(line, width);
 	}
-
 
 	#getKindIcon(kind: ExtensionKind): string {
 		switch (kind) {
@@ -308,7 +307,6 @@ export class ExtensionList implements Component {
 				return theme.fg("warning", theme.status.disabled);
 		}
 	}
-
 
 	#padText(text: string, targetWidth: number): string {
 		const width = visibleWidth(text);
@@ -498,8 +496,14 @@ export class ExtensionList implements Component {
 		// Normal mode
 
 		// j/k navigation
-		if (data === "k") { this.#moveSelectionUp(); return; }
-		if (data === "j") { this.#moveSelectionDown(); return; }
+		if (data === "k") {
+			this.#moveSelectionUp();
+			return;
+		}
+		if (data === "j") {
+			this.#moveSelectionDown();
+			return;
+		}
 
 		// / activates search
 		if (data === "/") {
@@ -516,8 +520,7 @@ export class ExtensionList implements Component {
 			if (item?.type === "master") {
 				this.callbacks.onMasterToggle?.(item.providerId);
 			} else if (item?.type === "kind-header") {
-				const eligible = this.#getExtensionsInCategory(this.#selectedIndex)
-					.filter(e => !e.isGlobalDisabled);
+				const eligible = this.#getExtensionsInCategory(this.#selectedIndex).filter(e => !e.isGlobalDisabled);
 				if (eligible.length > 0) {
 					this.callbacks.onCategoryToggle?.(eligible);
 				}
@@ -531,7 +534,6 @@ export class ExtensionList implements Component {
 			}
 			return;
 		}
-
 	}
 
 	#getExtensionsInCategory(headerIndex: number): Extension[] {

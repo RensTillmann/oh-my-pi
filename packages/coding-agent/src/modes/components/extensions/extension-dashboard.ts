@@ -25,16 +25,23 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { CONFIG_DIR_NAME, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
 import { Settings } from "../../../config/settings";
 import { DynamicBorder } from "../../../modes/components/dynamic-border";
 import { theme } from "../../../modes/theme/theme";
+import {
+	type ActionResult,
+	deleteExtension,
+	getMoveTargets,
+	type MoveTarget,
+	moveExtension,
+	renameExtension,
+} from "./extension-actions";
 import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import { SystemPromptEditorBody } from "./system-prompt-editor";
 import type { DashboardState, Extension } from "./types";
-import { setDisabledExtensions, setRestrictedExtensions } from "../../../capability";
-import { deleteExtension, getMoveTargets, moveExtension, renameExtension, type ActionResult, type MoveTarget } from "./extension-actions";
 import { requiresRestartToTakeEffect } from "./types";
 
 export class ExtensionDashboard extends Container {
@@ -51,8 +58,8 @@ export class ExtensionDashboard extends Container {
 		| null
 		| { type: "confirm"; action: "delete"; ext: Extension; message: string }
 		| { type: "picker"; action: "move"; ext: Extension; options: MoveTarget[]; selectedIndex: number }
-		| { type: "input"; action: "rename" | "custom-path"; ext: Extension; buffer: string; placeholder?: string }
-		= null;
+		| { type: "input"; action: "rename" | "custom-path"; ext: Extension; buffer: string; placeholder?: string } =
+		null;
 
 	onClose?: () => void;
 	onOpenFile?: (path: string) => void;
@@ -113,7 +120,7 @@ export class ExtensionDashboard extends Container {
 					this.#handleProviderToggle(providerId);
 				},
 				masterSwitchProvider: this.#getActiveProviderId(),
-				onCategoryToggle: (extensions) => {
+				onCategoryToggle: extensions => {
 					this.#handleCategoryToggle(extensions);
 				},
 			},
@@ -245,10 +252,12 @@ export class ExtensionDashboard extends Container {
 			}
 		}
 		const w = process.stdout.columns ?? 100;
+		const canRestrict = this.#state.selected?.canRestrict ?? false;
+		const restrictHint = canRestrict ? " R" : "";
 		if (w < 80) {
-			return theme.fg("dim", " \u2191\u2193 \u2190\u2192 Space D M N E R V Tab Esc");
+			return theme.fg("dim", ` ↑↓ ←→ Space D M N E${restrictHint} V Tab Esc`);
 		}
-		return theme.fg("dim", " \u2191\u2193 navigate  \u2190\u2192 category  Space:cycle  D M N E R  V:layout  Tab  Esc");
+		return theme.fg("dim", ` ↑↓ navigate  ←→ category  Space:cycle  D M N E${restrictHint}  V:layout  Tab  Esc`);
 	}
 
 	#renderTabBar(): string {
@@ -290,7 +299,6 @@ export class ExtensionDashboard extends Container {
 		toggleProvider(providerId);
 		void this.#refreshFromState();
 	}
-
 
 	/**
 	 * Three-state cycle on Space: Disabled globally → Active → Disabled for project → repeat.
@@ -353,21 +361,19 @@ export class ExtensionDashboard extends Container {
 		}
 
 		sm.setProject("projectDisabledExtensions", projectDisabled);
-		setDisabledExtensions(
-			(sm.get("disabledExtensions") as string[]) ?? [],
-			projectDisabled,
-		);
+		setDisabledExtensions((sm.get("disabledExtensions") as string[]) ?? [], projectDisabled);
 		void this.#refreshFromState();
 	}
 
 	#handleRestrictionToggle(ext: Extension): void {
+		if (!ext.canRestrict) return;
 		// No-op if globally disabled
 		if (ext.isGlobalDisabled) return;
 
 		const sm = this.settings ?? Settings.instance;
 		if (!sm) return;
 
-		const restrictions = ((sm.get("restrictedExtensions") as Record<string, string>) ?? {});
+		const restrictions = (sm.get("restrictedExtensions") as Record<string, string>) ?? {};
 		const updated = { ...restrictions };
 
 		if (ext.id in updated) {
@@ -382,7 +388,6 @@ export class ExtensionDashboard extends Container {
 		setRestrictedExtensions(updated, this.cwd);
 		void this.#refreshFromState();
 	}
-
 
 	async #refreshFromState(): Promise<void> {
 		// Remember current tab ID before refresh
@@ -467,15 +472,17 @@ export class ExtensionDashboard extends Container {
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "up") || data === "k") {
 					let next = mode.selectedIndex;
-					do { next = (next - 1 + mode.options.length) % mode.options.length; }
-					while (mode.options[next].current && next !== mode.selectedIndex);
+					do {
+						next = (next - 1 + mode.options.length) % mode.options.length;
+					} while (mode.options[next].current && next !== mode.selectedIndex);
 					mode.selectedIndex = next;
 					this.#buildLayout();
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "down") || data === "j") {
 					let next = mode.selectedIndex;
-					do { next = (next + 1) % mode.options.length; }
-					while (mode.options[next].current && next !== mode.selectedIndex);
+					do {
+						next = (next + 1) % mode.options.length;
+					} while (mode.options[next].current && next !== mode.selectedIndex);
 					mode.selectedIndex = next;
 					this.#buildLayout();
 					this.onRequestRender?.();
@@ -483,8 +490,11 @@ export class ExtensionDashboard extends Container {
 					const selected = mode.options[mode.selectedIndex];
 					if (selected && selected.label === "Custom path...") {
 						this.#actionMode = {
-							type: "input", action: "custom-path", ext: mode.ext,
-							buffer: "", placeholder: "Enter target directory path",
+							type: "input",
+							action: "custom-path",
+							ext: mode.ext,
+							buffer: "",
+							placeholder: "Enter target directory path",
 						};
 						this.#buildLayout();
 						this.onRequestRender?.();
@@ -528,9 +538,14 @@ export class ExtensionDashboard extends Container {
 				result = await deleteExtension(this.#actionMode.ext);
 				break;
 			case "move": {
-				const mode = this.#actionMode as { type: "picker"; options: MoveTarget[]; selectedIndex: number; ext: Extension };
+				const mode = this.#actionMode as {
+					type: "picker";
+					options: MoveTarget[];
+					selectedIndex: number;
+					ext: Extension;
+				};
 				const selected = mode.options[mode.selectedIndex];
-				if (selected && selected.targetDir) {
+				if (selected?.targetDir) {
 					result = await moveExtension(mode.ext, selected.targetDir);
 				}
 				break;
@@ -560,7 +575,6 @@ export class ExtensionDashboard extends Container {
 
 		await this.#refreshFromState();
 	}
-
 
 	handleInput(data: string): void {
 		// Action mode intercepts all input
@@ -667,7 +681,7 @@ export class ExtensionDashboard extends Container {
 		// R: Toggle project restriction
 		if (data === "r" || data === "R") {
 			const ext = this.#mainList.getSelectedExtension();
-			if (ext) this.#handleRestrictionToggle(ext);
+			if (ext?.canRestrict) this.#handleRestrictionToggle(ext);
 			return;
 		}
 
@@ -676,7 +690,9 @@ export class ExtensionDashboard extends Container {
 			const ext = this.#mainList.getSelectedExtension();
 			if (ext && ext.source.level !== "native") {
 				this.#actionMode = {
-					type: "confirm", action: "delete", ext,
+					type: "confirm",
+					action: "delete",
+					ext,
 					message: `Delete ${ext.kind} "${ext.displayName}"?`,
 				};
 				this.#buildLayout();
@@ -696,7 +712,11 @@ export class ExtensionDashboard extends Container {
 						{ label: "Custom path...", provider: "", scope: "project", targetDir: "" },
 					];
 					this.#actionMode = {
-					type: "picker", action: "move", ext, options, selectedIndex: options.findIndex(o => !o.current),
+						type: "picker",
+						action: "move",
+						ext,
+						options,
+						selectedIndex: options.findIndex(o => !o.current),
 					};
 					this.#buildLayout();
 				}
@@ -721,7 +741,9 @@ export class ExtensionDashboard extends Container {
 			const ext = this.#mainList.getSelectedExtension();
 			if (ext && ext.source.level !== "native" && ext.kind !== "context-file") {
 				this.#actionMode = {
-					type: "input", action: "rename", ext,
+					type: "input",
+					action: "rename",
+					ext,
 					buffer: ext.name,
 				};
 				this.#buildLayout();
