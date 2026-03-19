@@ -41,7 +41,7 @@ import { ExtensionList } from "./extension-list";
 import { InspectorPanel } from "./inspector-panel";
 import { applyFilter, createInitialState, filterByProvider, refreshState, toggleProvider } from "./state-manager";
 import { SystemPromptEditorBody } from "./system-prompt-editor";
-import { requiresRestartToTakeEffect, type DashboardState, type Extension } from "./types";
+import { type DashboardState, type Extension, requiresRestartToTakeEffect } from "./types";
 
 export class ExtensionDashboard extends Container {
 	#state!: DashboardState;
@@ -57,8 +57,8 @@ export class ExtensionDashboard extends Container {
 		| null
 		| { type: "confirm"; action: "delete"; ext: Extension; message: string }
 		| { type: "picker"; action: "move"; ext: Extension; options: MoveTarget[]; selectedIndex: number }
-		| { type: "input"; action: "rename" | "custom-path"; ext: Extension; buffer: string; placeholder?: string }
-		= null;
+		| { type: "input"; action: "rename" | "custom-path"; ext: Extension; buffer: string; placeholder?: string } =
+		null;
 
 	onClose?: () => void;
 	onOpenFile?: (path: string) => void;
@@ -205,10 +205,6 @@ export class ExtensionDashboard extends Container {
 		} else {
 			// Vertical layout: list uses full height (minus search bar + scroll indicator overhead)
 			const maxVisible = Math.max(5, bodyMaxHeight - 2);
-			this.#mainList.setMaxVisible(maxVisible);
-			this.#inspector.setMaxHeight(bodyMaxHeight);
-			this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
-		}
 			this.#mainList.setMaxVisible(maxVisible);
 			this.#inspector.setMaxHeight(bodyMaxHeight);
 			this.addChild(new TwoColumnBody(this.#mainList, this.#inspector, bodyMaxHeight));
@@ -390,30 +386,6 @@ export class ExtensionDashboard extends Container {
 		void this.#refreshFromState();
 	}
 
-	#handleRestrictionToggle(ext: Extension): void {
-		// No-op if globally disabled
-		if (ext.isGlobalDisabled) return;
-
-		const sm = this.settings ?? Settings.instance;
-		if (!sm) return;
-
-		const restrictions = ((sm.get("restrictedExtensions") as Record<string, string>) ?? {});
-		const updated = { ...restrictions };
-
-		if (ext.id in updated) {
-			// Remove restriction
-			delete updated[ext.id];
-		} else {
-			// Restrict to current project
-			updated[ext.id] = this.cwd;
-		}
-
-		sm.set("restrictedExtensions", updated);
-		setRestrictedExtensions(updated, this.cwd);
-		void this.#refreshFromState();
-	}
-
-
 	async #refreshFromState(): Promise<void> {
 		// Remember current tab ID before refresh
 		const currentTabId = this.#state.tabs[this.#state.activeTabIndex]?.id;
@@ -497,17 +469,17 @@ export class ExtensionDashboard extends Container {
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "up") || data === "k") {
 					let next = mode.selectedIndex;
-						do {
-							next = (next - 1 + mode.options.length) % mode.options.length;
-						} while (mode.options[next].current && next !== mode.selectedIndex);
+					do {
+						next = (next - 1 + mode.options.length) % mode.options.length;
+					} while (mode.options[next].current && next !== mode.selectedIndex);
 					mode.selectedIndex = next;
 					this.#buildLayout();
 					this.onRequestRender?.();
 				} else if (matchesKey(data, "down") || data === "j") {
 					let next = mode.selectedIndex;
-						do {
-							next = (next + 1) % mode.options.length;
-						} while (mode.options[next].current && next !== mode.selectedIndex);
+					do {
+						next = (next + 1) % mode.options.length;
+					} while (mode.options[next].current && next !== mode.selectedIndex);
 					mode.selectedIndex = next;
 					this.#buildLayout();
 					this.onRequestRender?.();

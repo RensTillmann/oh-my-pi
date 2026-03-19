@@ -7,7 +7,6 @@ import { logger } from "@oh-my-pi/pi-utils";
 import * as typebox from "@sinclair/typebox";
 import { isExtensionDisabled } from "../../capability";
 import { hookCapability } from "../../capability/hook";
-import { isExtensionDisabled } from "../../capability";
 import type { Hook } from "../../discovery";
 import { loadCapability } from "../../discovery";
 import type { HookMessage } from "../../session/messages";

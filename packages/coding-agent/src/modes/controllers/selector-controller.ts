@@ -27,8 +27,8 @@ import {
 	setPreferredImageProvider,
 	setPreferredSearchProvider,
 } from "../../tools";
-import { setSessionTerminalTitle } from "../../utils/title-generator";
 import { getEditorCommand } from "../../utils/external-editor";
+import { setSessionTerminalTitle } from "../../utils/title-generator";
 import { AgentDashboard } from "../components/agent-dashboard";
 import { AssistantMessageComponent } from "../components/assistant-message";
 import { ExtensionDashboard } from "../components/extensions";
@@ -187,7 +187,7 @@ export class SelectorController {
 			dashboard.onRequestRender = () => {
 				this.ctx.ui.requestRender();
 			};
-			dashboard.onOpenFile = (filePath) => {
+			dashboard.onOpenFile = filePath => {
 				done();
 				this.#showEditorOptionPicker(filePath);
 			};

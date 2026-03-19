@@ -262,8 +262,6 @@ export class ExtensionList implements Component {
 
 		return truncateToWidth(line, width);
 	}
-
-
 	#getKindIcon(kind: ExtensionKind): string {
 		switch (kind) {
 			case "extension-module":
@@ -308,8 +306,6 @@ export class ExtensionList implements Component {
 				return theme.fg("warning", theme.status.disabled);
 		}
 	}
-
-
 	#padText(text: string, targetWidth: number): string {
 		const width = visibleWidth(text);
 		if (width >= targetWidth) {
@@ -508,8 +504,7 @@ export class ExtensionList implements Component {
 			if (item?.type === "master") {
 				this.callbacks.onMasterToggle?.(item.providerId);
 			} else if (item?.type === "kind-header") {
-				const eligible = this.#getExtensionsInCategory(this.#selectedIndex)
-					.filter(e => !e.isGlobalDisabled);
+				const eligible = this.#getExtensionsInCategory(this.#selectedIndex).filter(e => !e.isGlobalDisabled);
 				if (eligible.length > 0) {
 					this.callbacks.onCategoryToggle?.(eligible);
 				}

@@ -310,9 +310,8 @@ export class InspectorPanel implements Component {
 		lines.push(theme.fg("muted", "Content:"));
 		lines.push(theme.fg("dim", theme.boxSharp.horizontal.repeat(Math.min(width - 2, 40))));
 
-		const content = raw && typeof raw === "object" && "content" in raw
-			? (raw as { content?: string }).content
-			: undefined;
+		const content =
+			raw && typeof raw === "object" && "content" in raw ? (raw as { content?: string }).content : undefined;
 
 		if (!content) {
 			lines.push(theme.fg("dim", "  (no content — press E to edit)"));

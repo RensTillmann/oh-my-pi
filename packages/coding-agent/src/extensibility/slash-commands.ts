@@ -1,7 +1,6 @@
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { isExtensionDisabled } from "../capability";
 import { slashCommandCapability } from "../capability/slash-command";
-import { isExtensionDisabled } from "../capability";
 import {
 	appendInlineArgsFallback,
 	renderPromptTemplate,

@@ -68,7 +68,9 @@ async function ensurePythonWhisper(options?: EnsureOptions): Promise<void> {
 			throw new Error(`Failed to install faster-whisper: ${stderr.split("\n").pop()}`);
 		}
 		// Install only the runtime deps we actually use (no av, no numba)
-		const deps = await $`${pythonCmd} -m pip install -q ctranslate2 tokenizers huggingface_hub numpy`.quiet().nothrow();
+		const deps = await $`${pythonCmd} -m pip install -q ctranslate2 tokenizers huggingface_hub numpy`
+			.quiet()
+			.nothrow();
 		if (deps.exitCode !== 0) {
 			const stderr = deps.stderr.toString().trim();
 			logger.warn(`Some faster-whisper deps failed to install: ${stderr.split("\n").pop()}`);

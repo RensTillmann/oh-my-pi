@@ -4,7 +4,6 @@
  */
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
-import { parseFrontmatter } from "../../../utils/frontmatter";
 import type { AppendSystemPrompt } from "../../../capability/append-system-prompt";
 import type { ContextFile } from "../../../capability/context-file";
 import type { ExtensionModule } from "../../../capability/extension-module";

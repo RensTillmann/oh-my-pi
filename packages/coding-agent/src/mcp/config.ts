@@ -11,7 +11,6 @@ import type { SourceMeta } from "../capability/types";
 import type { MCPServer } from "../discovery";
 import { loadCapability } from "../discovery";
 import { readDisabledServers } from "./config-writer";
-import { isExtensionDisabled } from "../capability";
 import type { MCPServerConfig } from "./types";
 
 /** Options for loading MCP configs */

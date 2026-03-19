@@ -11,7 +11,6 @@ import { $ } from "bun";
 import { isExtensionDisabled } from "./capability";
 import { contextFileCapability } from "./capability/context-file";
 import { systemPromptCapability } from "./capability/system-prompt";
-import { isExtensionDisabled } from "./capability";
 import { renderPromptTemplate } from "./config/prompt-templates";
 import type { SkillsSettings } from "./config/settings";
 import { type ContextFile, loadCapability, type SystemPrompt as SystemPromptFile } from "./discovery";

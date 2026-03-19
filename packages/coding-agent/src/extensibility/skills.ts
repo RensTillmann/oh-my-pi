@@ -8,7 +8,6 @@ import type { SkillsSettings } from "../config/settings";
 import { type Skill as CapabilitySkill, loadCapability } from "../discovery";
 import { compareSkillOrder, scanSkillsFromDir } from "../discovery/helpers";
 import { expandTilde } from "../tools/path-utils";
-import { isExtensionDisabled } from "../capability";
 
 export interface Skill {
 	name: string;

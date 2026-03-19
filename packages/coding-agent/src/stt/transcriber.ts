@@ -42,7 +42,13 @@ export async function transcribe(audioPath: string, options?: TranscribeOptions)
 	const modelName = options?.modelName ?? "base.en";
 	const language = options?.language ?? "en";
 
-	logger.debug("Transcribing audio", { backend: options?.backend ?? "openai-whisper", pythonCmd, audioPath, modelName, language });
+	logger.debug("Transcribing audio", {
+		backend: options?.backend ?? "openai-whisper",
+		pythonCmd,
+		audioPath,
+		modelName,
+		language,
+	});
 
 	const script = options?.backend === "faster-whisper" ? transcribeFasterScript : transcribeScript;
 	const proc = Bun.spawn([pythonCmd, "-c", script, audioPath, modelName, language], {
