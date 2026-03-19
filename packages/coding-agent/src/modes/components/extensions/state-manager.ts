@@ -487,8 +487,8 @@ export function buildSidebarTree(extensions: Extension[]): TreeNode[] {
 				});
 			}
 
-			// Sort kind nodes by count (most items first)
-			kindNodes.sort((a, b) => (b.count || 0) - (a.count || 0));
+			// Sort kind nodes by count (fewest items first for discoverability)
+			kindNodes.sort((a, b) => (a.count || 0) - (b.count || 0));
 		}
 
 		tree.push({

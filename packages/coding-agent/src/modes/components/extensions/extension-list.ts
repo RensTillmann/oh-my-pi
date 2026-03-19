@@ -356,24 +356,10 @@ export class ExtensionList implements Component {
 			byKind.set(ext.kind, list);
 		}
 
-		const kindOrder: ExtensionKind[] = [
-			"extension-module",
-			"skill",
-			"tool",
-			"slash-command",
-			"rule",
-			"mcp",
-			"hook",
-			"prompt",
-			"context-file",
-			"append-system-prompt",
-			"instruction",
-		];
+		// Sort kinds by count ascending for discoverability (fewer items first)
+		const kindsWithItems = Array.from(byKind.entries()).sort((a, b) => a[1].length - b[1].length);
 
-		for (const kind of kindOrder) {
-			const items = byKind.get(kind);
-			if (!items || items.length === 0) continue;
-
+		for (const [kind, items] of kindsWithItems) {
 			const activeCount = items.filter(e => e.state === "active").length;
 			this.#listItems.push({
 				type: "kind-header",
