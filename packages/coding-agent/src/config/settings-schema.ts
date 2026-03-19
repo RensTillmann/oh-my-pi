@@ -260,6 +260,150 @@ export const SETTINGS_SCHEMA = {
 			submenu: true,
 		},
 	},
+	"grep.contextAfter": {
+		type: "number",
+		default: 0,
+		ui: {
+			tab: "tools",
+			label: "Grep context after",
+			description: "Lines of context after each grep match",
+			submenu: true,
+		},
+	},
+	"astGrep.enabled": {
+		type: "boolean",
+		default: true,
+		ui: { tab: "tools", label: "Enable AST Grep", description: "Enable the ast_grep tool for structural AST search" },
+	},
+	"astEdit.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Enable AST Edit",
+			description: "Enable the ast_edit tool for structural AST rewrites",
+		},
+	},
+	"renderMermaid.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			label: "Enable Render Mermaid",
+			description: "Enable the render_mermaid tool for Mermaid-to-ASCII rendering",
+		},
+	},
+	"notebook.enabled": {
+		type: "boolean",
+		default: true,
+		ui: { tab: "tools", label: "Enable Notebook", description: "Enable the notebook tool for notebook editing" },
+	},
+	"inspect_image.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			label: "Enable Inspect Image",
+			description: "Enable the inspect_image tool, delegating image understanding to a vision-capable model",
+		},
+	},
+	"checkpoint.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			label: "Enable Checkpoint/Rewind",
+			description: "Enable the checkpoint and rewind tools for context checkpointing",
+		},
+	},
+	"fetch.enabled": {
+		type: "boolean",
+		default: true,
+		ui: { tab: "tools", label: "Enable Fetch", description: "Enable the fetch tool for URL fetching" },
+	},
+	"web_search.enabled": {
+		type: "boolean",
+		default: true,
+		ui: { tab: "tools", label: "Enable Web Search", description: "Enable the web_search tool for web searching" },
+	},
+	"lsp.enabled": {
+		type: "boolean",
+		default: true,
+		ui: { tab: "tools", label: "Enable LSP", description: "Enable the lsp tool for language server protocol" },
+	},
+	"calc.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			label: "Enable Calculator",
+			description: "Enable the calculator tool for basic calculations",
+		},
+	},
+	"browser.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Enable Browser",
+			description: "Enable the browser tool (Ulixee Hero)",
+		},
+	},
+	"browser.headless": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Browser headless",
+			description: "Launch browser in headless mode (disable to show browser UI)",
+		},
+	},
+	"browser.screenshotDir": {
+		type: "string",
+		ui: {
+			tab: "tools",
+			label: "Screenshot directory",
+			description: "Directory to save screenshots. If unset, screenshots go to a temp file. Supports ~. Examples: ~/Downloads, ~/Desktop, /sdcard/Download (Android)",
+		},
+	},
+	"tools.intentTracing": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "tools",
+			label: "Intent tracing",
+			description: "Ask the agent to describe the intent of each tool call before executing it",
+		},
+	},
+	"tools.maxTimeout": {
+		type: "number",
+		default: 0,
+		ui: {
+			tab: "tools",
+			label: "Max tool timeout",
+			description: "Maximum timeout in seconds the agent can set for any tool (0 = no limit)",
+			submenu: true,
+		},
+	},
+	"async.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			label: "Async execution",
+			description: "Enable async bash commands and background task execution",
+		},
+	},
+	"async.maxJobs": {
+		type: "number",
+		default: 100,
+		ui: {
+			tab: "tools",
+			label: "Async max jobs",
+			description: "Maximum concurrent background jobs (1-100)",
+			submenu: true,
+		},
+	},
 
 	"statusLine.showHookStatus": {
 		type: "boolean",
