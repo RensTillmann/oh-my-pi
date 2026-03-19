@@ -619,18 +619,16 @@ export function buildProviderTabs(extensions: Extension[]): ProviderTab[] {
 		});
 	}
 
-	// System prompt tab — appears 2nd after ALL
+	// System prompt tab
 	const promptCount = extensions.filter(ext => ext.kind === "append-system-prompt").length;
 	tabs.push({ id: "system-prompt", label: "APPEND_SYSTEM.md", enabled: true, count: promptCount });
 
-	// Sort: ALL first, Prompt 2nd, then providers by activity
+	// Sort: ALL first, then providers by activity
 	tabs.sort((a, b) => {
 		if (a.id === "all") return -1;
 		if (b.id === "all") return 1;
-		if (a.id === "system-prompt") return -1; // Prompt always 2nd
-		if (b.id === "system-prompt") return 1;
 
-		// Then sort providers: enabled with content, disabled, empty
+		// Sort providers: enabled with content, disabled, empty
 		const category = (t: ProviderTab) => {
 			if (!t.enabled) return 2;
 			if (t.count === 0) return 3;
@@ -644,6 +642,15 @@ export function buildProviderTabs(extensions: Extension[]): ProviderTab[] {
 		// Within same category, sort by count descending
 		return b.count - a.count;
 	});
+
+	// Move system-prompt tab to appear right after agents-md
+	const systemPromptIndex = tabs.findIndex(t => t.id === "system-prompt");
+	if (systemPromptIndex !== -1) {
+		const [systemPromptTab] = tabs.splice(systemPromptIndex, 1);
+		const agentsMdIndex = tabs.findIndex(t => t.id === "agents-md");
+		const insertIndex = agentsMdIndex !== -1 ? agentsMdIndex + 1 : tabs.findIndex(t => !t.enabled || t.count === 0);
+		tabs.splice(insertIndex === -1 ? tabs.length : insertIndex, 0, systemPromptTab);
+	}
 
 	return tabs;
 }
