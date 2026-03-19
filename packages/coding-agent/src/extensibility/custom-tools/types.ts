@@ -10,6 +10,7 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { Rule } from "../../capability/rule";
 import type { ModelRegistry } from "../../config/model-registry";
+import type { Settings } from "../../config/settings";
 import type { ExecOptions, ExecResult } from "../../exec/exec";
 import type { HookUIContext } from "../../extensibility/hooks/types";
 import type { Theme } from "../../modes/theme/theme";
@@ -76,6 +77,8 @@ export interface CustomToolContext {
 	hasQueuedMessages(): boolean;
 	/** Abort the current agent operation (fire-and-forget, does not wait) */
 	abort(): void;
+	/** Settings instance for the current session. Prefer over the global singleton. */
+	settings?: Settings;
 }
 
 /** Session event passed to onSession callback */
@@ -181,6 +184,10 @@ export interface CustomTool<TParams extends TSchema = TSchema, TDetails = any> {
 	hidden?: boolean;
 	/** If true, tool may stage deferred changes that require explicit resolve/discard. */
 	deferrable?: boolean;
+	/** MCP server name for discovery/search metadata when this tool fronts an MCP server. */
+	mcpServerName?: string;
+	/** Original MCP tool name for discovery/search metadata. */
+	mcpToolName?: string;
 	/**
 	 * Execute the tool.
 	 * @param toolCallId - Unique ID for this tool call

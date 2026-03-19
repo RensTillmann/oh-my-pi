@@ -65,6 +65,12 @@ import {
 } from "./internal-urls";
 import { disposeAllKernelSessions } from "./ipy/executor";
 import { discoverAndLoadMCPTools, type MCPManager, type MCPToolsLoadResult } from "./mcp";
+import {
+	collectDiscoverableMCPTools,
+	formatDiscoverableMCPToolServerSummary,
+	selectDiscoverableMCPToolNamesByServer,
+	summarizeDiscoverableMCPTools,
+} from "./mcp/discoverable-tool-metadata";
 import { buildMemoryToolDeveloperInstructions, getMemoryRoot, startMemoryStartupTask } from "./memories";
 import asyncResultTemplate from "./prompts/tools/async-result.md" with { type: "text" };
 import { collectEnvSecrets, loadSecrets, obfuscateMessages, SecretObfuscator } from "./secrets";
@@ -76,10 +82,11 @@ import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
 import {
 	buildSystemPrompt as buildSystemPromptInternal,
+	buildSystemPromptToolMetadata,
 	loadProjectContextFiles as loadContextFilesInternal,
 } from "./system-prompt";
 import { AgentOutputManager } from "./task/output-manager";
-import { resolveThinkingLevelForModel, toReasoningEffort } from "./thinking";
+import { parseThinkingLevel, resolveThinkingLevelForModel, toReasoningEffort } from "./thinking";
 import {
 	BashTool,
 	BUILTIN_TOOLS,
@@ -95,6 +102,7 @@ import {
 	PythonTool,
 	ReadTool,
 	ResolveTool,
+	renderSearchToolBm25Description,
 	setPreferredCodeSearchProvider,
 	setPreferredImageProvider,
 	setPreferredSearchProvider,
@@ -184,7 +192,7 @@ export interface CreateAgentSessionOptions {
 	/** Parent task ID prefix for nested artifact naming (e.g., "6-Extensions") */
 	parentTaskPrefix?: string;
 
-	/** Session manager. Default: SessionManager.create(cwd) */
+	/** Session manager. Default: session stored under the configured agentDir sessions root */
 	sessionManager?: SessionManager;
 
 	/** Settings instance. Default: Settings.init({ cwd, agentDir }) */
@@ -414,6 +422,10 @@ function customToolToDefinition(tool: CustomTool): ToolDefinition {
 		label: tool.label,
 		description: tool.description,
 		parameters: tool.parameters,
+		hidden: tool.hidden,
+		deferrable: tool.deferrable,
+		mcpServerName: tool.mcpServerName,
+		mcpToolName: tool.mcpToolName,
 		execute: (toolCallId, params, signal, onUpdate, ctx) =>
 			tool.execute(toolCallId, params, onUpdate, createCustomToolContext(ctx), signal),
 		onSession: tool.onSession ? (event, ctx) => tool.onSession?.(event, createCustomToolContext(ctx)) : undefined,
@@ -626,9 +638,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	if (!options.modelRegistry) {
 		modelRegistry.refreshInBackground();
 	}
-	const skillsSettings = settings.getGroup("skills") as SkillsSettings;
+	const skillsSettings = settings.getGroup("skills");
+	const disabledExtensionIds = settings.get("disabledExtensions") ?? [];
 	const discoveredSkillsPromise =
-		options.skills === undefined ? discoverSkills(cwd, agentDir, skillsSettings) : undefined;
+		options.skills === undefined
+			? discoverSkills(cwd, agentDir, { ...skillsSettings, disabledExtensions: disabledExtensionIds })
+			: undefined;
 
 	// Initialize provider preferences from settings
 	const webSearchProvider = settings.get("providers.webSearch");
@@ -646,7 +661,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		setPreferredImageProvider(imageProvider);
 	}
 
-	const sessionManager = options.sessionManager ?? logger.time("sessionManager", SessionManager.create, cwd);
+	const sessionManager =
+		options.sessionManager ??
+		logger.time("sessionManager", () =>
+			SessionManager.create(cwd, SessionManager.getDefaultSessionDir(cwd, agentDir)),
+		);
 	const sessionId = sessionManager.getSessionId();
 	const modelApiKeyAvailability = new Map<string, boolean>();
 	const getModelAvailabilityKey = (candidate: Model): string =>
@@ -708,7 +727,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// If session has data and includes a thinking entry, restore it
 	if (thinkingLevel === undefined && hasExistingSession && hasThinkingEntry) {
-		thinkingLevel = existingSession.thinkingLevel as ThinkingLevel | undefined;
+		thinkingLevel = parseThinkingLevel(existingSession.thinkingLevel);
 	}
 
 	if (thinkingLevel === undefined && !hasExplicitModel && !hasThinkingEntry && defaultRoleSpec.explicitThinkingLevel) {
@@ -862,6 +881,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		getCompactContext: () => session.formatCompactContext(),
 		getTodoPhases: () => session.getTodoPhases(),
 		setTodoPhases: phases => session.setTodoPhases(phases),
+		isMCPDiscoveryEnabled: () => session.isMCPDiscoveryEnabled(),
+		getDiscoverableMCPTools: () => session.getDiscoverableMCPTools(),
+		getDiscoverableMCPSearchIndex: () => session.getDiscoverableMCPSearchIndex(),
+		getSelectedMCPToolNames: () => session.getSelectedMCPToolNames(),
+		activateDiscoveredMCPTools: toolNames => session.activateDiscoveredMCPTools(toolNames),
 		getCheckpointState: () => session.getCheckpointState(),
 		setCheckpointState: state => session.setCheckpointState(state ?? undefined),
 		allocateOutputArtifact: async toolType => {
@@ -933,7 +957,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				// Always filter Exa - we have native integration
 				filterExa: true,
 				// Filter browser MCP servers when builtin browser tool is active
-				filterBrowser: (settings.get("browser.enabled") as boolean) ?? false,
+				filterBrowser: settings.get("browser.enabled") ?? false,
 				cacheStorage: settings.getStorage(),
 				authStorage,
 			}),
@@ -1003,16 +1027,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		extensionsResult = options.preloadedExtensions;
 	} else {
 		// Merge CLI extension paths with settings extension paths
-		const configuredPaths = [
-			...(options.additionalExtensionPaths ?? []),
-			...((settings.get("extensions") as string[]) ?? []),
-		];
+		const configuredPaths = [...(options.additionalExtensionPaths ?? []), ...(settings.get("extensions") ?? [])];
+		const disabledExtensionIds = settings.get("disabledExtensions") ?? [];
 		extensionsResult = await logger.timeAsync(
 			"discoverAndLoadExtensions",
 			discoverAndLoadExtensions,
 			configuredPaths,
 			cwd,
 			eventBus,
+			disabledExtensionIds,
 		);
 		for (const { path, error } of extensionsResult.errors) {
 			logger.error("Failed to load extension", { path, error });
@@ -1114,11 +1137,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		abort: () => {
 			session.abort();
 		},
+		settings,
 	});
 	const toolContextStore = new ToolContextStore(getSessionContext);
 
 	const registeredTools = extensionRunner?.getAllRegisteredTools() ?? [];
-	let wrappedExtensionTools: AgentTool[];
+	let wrappedExtensionTools: Tool[];
 
 	if (extensionRunner) {
 		// With extension runner: convert CustomTools to ToolDefinitions and wrap all together
@@ -1140,16 +1164,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			isIdle: () => !session?.isStreaming,
 			hasQueuedMessages: () => (session?.queuedMessageCount ?? 0) > 0,
 			abort: () => session?.abort(),
+			settings,
 		});
 		wrappedExtensionTools = (options.customTools ?? [])
 			.filter(isCustomTool)
-			.map(tool => CustomToolAdapter.wrap(tool, customToolContext) as AgentTool);
+			.map(tool => CustomToolAdapter.wrap(tool, customToolContext));
 	}
 
 	// All built-in tools are active (conditional tools like git/ask return null from factory if disabled)
-	const toolRegistry = new Map<string, AgentTool>();
+	const toolRegistry = new Map<string, Tool>();
 	for (const tool of builtinTools) {
-		toolRegistry.set(tool.name, tool as AgentTool);
+		toolRegistry.set(tool.name, tool);
 	}
 	for (const tool of wrappedExtensionTools) {
 		toolRegistry.set(tool.name, tool);
@@ -1169,7 +1194,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	} else if (!toolRegistry.has("resolve")) {
 		const resolveTool = await logger.timeAsync("createTools:resolve:session", HIDDEN_TOOLS.resolve, toolSession);
 		if (resolveTool) {
-			toolRegistry.set(resolveTool.name, wrapToolWithMetaNotice(resolveTool) as AgentTool);
+			toolRegistry.set(resolveTool.name, wrapToolWithMetaNotice(resolveTool));
 		}
 	}
 
@@ -1186,6 +1211,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const intentField = settings.get("tools.intentTracing") || $env.PI_INTENT_TRACING === "1" ? INTENT_FIELD : undefined;
 	const rebuildSystemPrompt = async (toolNames: string[], tools: Map<string, AgentTool>): Promise<string> => {
 		toolContextStore.setToolNames(toolNames);
+		const discoverableMCPTools = mcpDiscoveryEnabled ? collectDiscoverableMCPTools(tools.values()) : [];
+		const discoverableMCPSummary = summarizeDiscoverableMCPTools(discoverableMCPTools);
+		const hasDiscoverableMCPTools =
+			mcpDiscoveryEnabled && toolNames.includes("search_tool_bm25") && discoverableMCPTools.length > 0;
+		const promptTools = buildSystemPromptToolMetadata(tools, {
+			search_tool_bm25: { description: renderSearchToolBm25Description(discoverableMCPTools) },
+		});
 		const memoryInstructions = await buildMemoryToolDeveloperInstructions(agentDir, settings);
 
 		// Build combined append prompt: memory instructions + MCP server instructions
@@ -1211,14 +1243,16 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			cwd,
 			skills,
 			contextFiles,
-			tools,
+			tools: promptTools,
 			toolNames,
 			rules: rulebookRules,
-			skillsSettings: settings.getGroup("skills") as SkillsSettings,
+			skillsSettings: settings.getGroup("skills"),
 			appendSystemPrompt: appendPrompt,
 			repeatToolDescriptions,
-			eagerTasks,
 			intentField,
+			mcpDiscoveryMode: hasDiscoverableMCPTools,
+			mcpDiscoveryServerSummaries: discoverableMCPSummary.servers.map(formatDiscoverableMCPToolServerSummary),
+			eagerTasks,
 		});
 
 		if (options.systemPrompt === undefined) {
@@ -1229,15 +1263,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				cwd,
 				skills,
 				contextFiles,
-				tools,
+				tools: promptTools,
 				toolNames,
 				rules: rulebookRules,
-				skillsSettings: settings.getGroup("skills") as SkillsSettings,
+				skillsSettings: settings.getGroup("skills"),
 				customPrompt: options.systemPrompt,
 				appendSystemPrompt: appendPrompt,
 				repeatToolDescriptions,
-				eagerTasks,
 				intentField,
+				mcpDiscoveryMode: hasDiscoverableMCPTools,
+				mcpDiscoveryServerSummaries: discoverableMCPSummary.servers.map(formatDiscoverableMCPToolServerSummary),
+				eagerTasks,
 			});
 		}
 		return options.systemPrompt(defaultPrompt);
@@ -1247,9 +1283,40 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const requestedToolNames = options.toolNames?.map(name => name.toLowerCase()) ?? toolNamesFromRegistry;
 	const normalizedRequested = requestedToolNames.filter(name => toolRegistry.has(name));
 	const includeExitPlanMode = requestedToolNames.includes("exit_plan_mode");
-	const initialToolNames = includeExitPlanMode
+	const mcpDiscoveryEnabled = settings.get("mcp.discoveryMode") ?? false;
+	const requestedActiveToolNames = includeExitPlanMode
 		? normalizedRequested
 		: normalizedRequested.filter(name => name !== "exit_plan_mode");
+	const explicitlyRequestedMCPToolNames = options.toolNames
+		? requestedActiveToolNames.filter(name => name.startsWith("mcp_"))
+		: [];
+	const discoveryDefaultServers = new Set(
+		(settings.get("mcp.discoveryDefaultServers") ?? []).map(serverName => serverName.trim()).filter(Boolean),
+	);
+	const discoveryDefaultServerToolNames = mcpDiscoveryEnabled
+		? selectDiscoverableMCPToolNamesByServer(
+				collectDiscoverableMCPTools(toolRegistry.values()),
+				discoveryDefaultServers,
+			)
+		: [];
+	let initialSelectedMCPToolNames: string[] = [];
+	let defaultSelectedMCPToolNames: string[] = [];
+	let initialToolNames = [...requestedActiveToolNames];
+	if (mcpDiscoveryEnabled) {
+		const restoredSelectedMCPToolNames = existingSession.selectedMCPToolNames.filter(name => toolRegistry.has(name));
+		defaultSelectedMCPToolNames = [
+			...new Set([...discoveryDefaultServerToolNames, ...explicitlyRequestedMCPToolNames]),
+		];
+		initialSelectedMCPToolNames = existingSession.hasPersistedMCPToolSelection
+			? restoredSelectedMCPToolNames
+			: [...new Set([...restoredSelectedMCPToolNames, ...defaultSelectedMCPToolNames])];
+		initialToolNames = [
+			...new Set([
+				...requestedActiveToolNames.filter(name => !name.startsWith("mcp_")),
+				...initialSelectedMCPToolNames,
+			]),
+		];
+	}
 
 	// Custom tools and extension-registered tools are always included regardless of toolNames filter
 	const alwaysInclude: string[] = [
@@ -1257,6 +1324,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		...registeredTools.map(t => t.definition.name),
 	];
 	for (const name of alwaysInclude) {
+		if (mcpDiscoveryEnabled && name.startsWith("mcp_")) {
+			continue;
+		}
 		if (toolRegistry.has(name) && !initialToolNames.includes(name)) {
 			initialToolNames.push(name);
 		}
@@ -1293,17 +1363,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 					if (hasImages) {
 						const filteredContent = content
 							.map(c => (c.type === "image" ? { type: "text" as const, text: "Image reading is disabled." } : c))
-							.filter(
-								(c, i, arr) =>
-									// Dedupe consecutive "Image reading is disabled." texts
-									!(
-										c.type === "text" &&
-										c.text === "Image reading is disabled." &&
-										i > 0 &&
-										arr[i - 1].type === "text" &&
-										(arr[i - 1] as { type: "text"; text: string }).text === "Image reading is disabled."
-									),
-							);
+							.filter((c, i, arr) => {
+								// Dedupe consecutive "Image reading is disabled." texts
+								if (!(c.type === "text" && c.text === "Image reading is disabled." && i > 0)) return true;
+								const prev = arr[i - 1];
+								return !(prev.type === "text" && prev.text === "Image reading is disabled.");
+							});
 						return { ...msg, content: filteredContent };
 					}
 				}
@@ -1435,13 +1500,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		customCommands: customCommandsResult.commands,
 		skills,
 		skillWarnings,
-		skillsSettings: settings.getGroup("skills") as Required<SkillsSettings>,
+		skillsSettings: settings.getGroup("skills"),
 		modelRegistry,
 		toolRegistry,
 		transformContext,
 		onPayload,
 		convertToLlm: convertToLlmFinal,
 		rebuildSystemPrompt,
+		mcpDiscoveryEnabled,
+		initialSelectedMCPToolNames,
+		defaultSelectedMCPToolNames,
+		defaultSelectedMCPServerNames: [...discoveryDefaultServers],
 		ttsrManager,
 		obfuscator,
 		asyncJobManager,
@@ -1510,7 +1579,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		mcpManager.setOnResourcesChanged((serverName, uri) => {
 			logger.debug("MCP resources changed", { path: `mcp:${serverName}`, uri });
 			if (!settings.get("mcp.notifications")) return;
-			const debounceMs = (settings.get("mcp.notificationDebounceMs") as number) ?? 500;
+			const debounceMs = settings.get("mcp.notificationDebounceMs");
 			const key = `${serverName}:${uri}`;
 			const existing = notificationDebounceTimers.get(key);
 			if (existing) clearTimeout(existing);

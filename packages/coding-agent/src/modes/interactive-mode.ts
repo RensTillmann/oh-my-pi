@@ -24,7 +24,7 @@ import type { SessionContext, SessionManager } from "../session/session-manager"
 import { getRecentSessions } from "../session/session-manager";
 import { STTController, type SttState } from "../stt";
 import type { ExitPlanModeDetails } from "../tools";
-import { setTerminalTitle } from "../utils/title-generator";
+import { popTerminalTitle, pushTerminalTitle, setSessionTerminalTitle } from "../utils/title-generator";
 import type { AssistantMessageComponent } from "./components/assistant-message";
 import type { BashExecutionComponent } from "./components/bash-execution";
 import { CustomEditor } from "./components/custom-editor";
@@ -323,12 +323,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			}
 		}
 
-		// Set terminal title if session already has one (resumed session)
-		const existingTitle = this.sessionManager.getSessionName();
-		if (existingTitle) {
-			setTerminalTitle(`pi: ${existingTitle}`);
-		}
-
 		this.ui.addChild(this.chatContainer);
 		this.ui.addChild(this.pendingMessagesContainer);
 		this.ui.addChild(this.statusContainer);
@@ -347,12 +341,11 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// Start the UI
 		this.ui.start();
+		pushTerminalTitle();
+		setSessionTerminalTitle(this.sessionManager.getSessionName(), this.sessionManager.getCwd());
 		this.#syncEditorMaxHeight();
 		this.isInitialized = true;
 		this.ui.requestRender(true);
-
-		// Set initial terminal title (will be updated when session title is generated)
-		this.ui.terminal.setTitle("π");
 
 		// Initialize hooks with TUI-based UI context
 		await this.initHooksAndCustomTools();
@@ -542,7 +535,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		const indent = "  ";
 		const hook = theme.tree.hook;
-		const lines = [indent + theme.bold(theme.fg("accent", "Todos"))];
+		const lines = ["", indent + theme.bold(theme.fg("accent", "Todos"))];
 
 		if (!this.todoExpanded) {
 			const activePhase = this.#getActivePhase(phases);
@@ -555,7 +548,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			});
 			if (visibleTasks.length < activePhase.tasks.length) {
 				const remaining = activePhase.tasks.length - visibleTasks.length;
-				lines.push(theme.fg("muted", `${indent}  ${hook} +${remaining} more (Ctrl+T to expand)`));
+				lines.push(theme.fg("muted", `${indent}  ${hook} +${remaining} more`));
 			}
 			this.todoContainer.addChild(new Text(lines.join("\n"), 1, 0));
 			return;
@@ -883,7 +876,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Drain any in-flight Kitty key release events before stopping.
 		// This prevents escape sequences from leaking to the parent shell over slow SSH.
 		await this.ui.terminal.drainInput(1000);
-
+		popTerminalTitle();
 		this.stop();
 
 		// Print resumption hint if this is a persisted session
@@ -1282,6 +1275,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	handleResumeSession(sessionPath: string): Promise<void> {
 		this.#btwController.dispose();
 		return this.#selectorController.handleResumeSession(sessionPath);
+	}
+
+	handleSessionDeleteCommand(): Promise<void> {
+		return this.#selectorController.handleSessionDeleteCommand();
 	}
 
 	showOAuthSelector(mode: "login" | "logout", providerId?: string): Promise<void> {
