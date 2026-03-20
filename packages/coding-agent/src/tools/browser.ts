@@ -1375,7 +1375,7 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 					const paramPath = params.path ? expandPath(params.path as string) : undefined;
 					let dest: string;
 					if (paramPath) {
-						dest = path.isAbsolute(paramPath) ? paramPath : path.join(screenshotDir ?? process.cwd(), paramPath);
+						dest = path.isAbsolute(paramPath) ? paramPath : path.join(process.cwd(), paramPath);
 					} else if (screenshotDir) {
 						const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
 						dest = path.join(screenshotDir, `screenshot-${ts}.png`);
@@ -1383,21 +1383,28 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 						dest = path.join(os.tmpdir(), `omp-sshots-${Snowflake.next()}.png`);
 					}
 					await fs.mkdir(path.dirname(dest), { recursive: true });
-					await Bun.write(dest, paramPath || screenshotDir ? buffer : resized.buffer);
+					// Full-res buffer when saving to a user-defined location; resized (API copy) for temp-only.
+					const saveFullRes = !!(paramPath || screenshotDir);
+					const savedBuffer = saveFullRes ? buffer : resized.buffer;
+					const savedMimeType = saveFullRes ? "image/png" : resized.mimeType;
+					await Bun.write(dest, savedBuffer);
 					details.screenshotPath = dest;
-					details.mimeType = resized.mimeType;
-					details.bytes = resized.buffer.length;
+					details.mimeType = savedMimeType;
+					details.bytes = savedBuffer.length;
 
-					// Show both raw bytes (saved to disk) and compressed bytes (sent to model).
-					const lines = [
-						"Screenshot captured",
-						`Format: ${resized.mimeType} (${(resized.buffer.length / 1024).toFixed(2)} KB)`,
-						`Dimensions: ${resized.width}x${resized.height}`,
-					];
+					const lines = ["Screenshot captured"];
+					if (saveFullRes) {
+						lines.push(`Saved: ${savedMimeType} (${(savedBuffer.length / 1024).toFixed(2)} KB)`);
+						lines.push(
+							`Model: ${resized.mimeType} (${(resized.buffer.length / 1024).toFixed(2)} KB, ${resized.width}x${resized.height})`,
+						);
+					} else {
+						lines.push(`Format: ${resized.mimeType} (${(resized.buffer.length / 1024).toFixed(2)} KB)`);
+						lines.push(`Dimensions: ${resized.width}x${resized.height}`);
+					}
 					if (dimensionNote) {
 						lines.push(dimensionNote);
 					}
-
 					return toolResult(details)
 						.content([
 							{ type: "text", text: lines.join("\n") },
