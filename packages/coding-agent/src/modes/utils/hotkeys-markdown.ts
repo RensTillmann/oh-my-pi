@@ -37,6 +37,8 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		`| \`${appKey(bindings, "clear")}\` | Clear editor (first) / exit (second) |`,
 		`| \`${appKey(bindings, "exit")}\` | Exit (when editor is empty) |`,
 		`| \`${appKey(bindings, "suspend")}\` | Suspend to background |`,
+		`| \`${appKey(bindings, "pauseRender")}\` | Pause UI rendering (Termux only) |`,
+		`| \`${appKey(bindings, "resumeRender")}\` | Resume UI rendering (Termux only) |`,
 		`| \`${appKey(bindings, "cycleThinkingLevel")}\` | Cycle thinking level |`,
 		`| \`${appKey(bindings, "cycleModelForward")}\` | Cycle role models (slow/default/smol) |`,
 		`| \`${appKey(bindings, "cycleModelBackward")}\` | Cycle role models (temporary) |`,

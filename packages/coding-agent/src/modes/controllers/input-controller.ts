@@ -14,6 +14,8 @@ import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { resizeImage } from "../../utils/image-resize";
 import { generateSessionTitle, setSessionTerminalTitle } from "../../utils/title-generator";
 
+const IS_TERMUX = Boolean(process.env.TERMUX_VERSION) || process.platform === "android";
+
 interface Expandable {
 	setExpanded(expanded: boolean): void;
 }
@@ -23,6 +25,9 @@ function isExpandable(obj: unknown): obj is Expandable {
 }
 
 export class InputController {
+	#renderPausePending = false;
+	#renderPauseUnsubscribe: (() => void) | undefined;
+
 	constructor(private ctx: InteractiveModeContext) {}
 
 	setupKeyHandlers(): void {
@@ -89,6 +94,13 @@ export class InputController {
 		this.ctx.editor.onExit = () => this.handleCtrlD();
 		this.ctx.editor.setActionKeys("suspend", this.ctx.keybindings.getKeys("suspend"));
 		this.ctx.editor.onSuspend = () => this.handleCtrlZ();
+		const pauseKeys = IS_TERMUX ? this.ctx.keybindings.getKeys("pauseRender") : [];
+		const resumeKeys = IS_TERMUX ? this.ctx.keybindings.getKeys("resumeRender") : [];
+		const enableRenderPause = pauseKeys.length > 0 && resumeKeys.length > 0;
+		this.ctx.editor.setActionKeys("pauseRender", enableRenderPause ? pauseKeys : []);
+		this.ctx.editor.onPauseRender = enableRenderPause ? () => this.#handlePauseRender() : undefined;
+		this.ctx.editor.setActionKeys("resumeRender", enableRenderPause ? resumeKeys : []);
+		this.ctx.editor.onResumeRender = enableRenderPause ? () => this.#handleResumeRender() : undefined;
 		this.ctx.editor.setActionKeys("cycleThinkingLevel", this.ctx.keybindings.getKeys("cycleThinkingLevel"));
 		this.ctx.editor.onCycleThinkingLevel = () => this.cycleThinkingLevel();
 		this.ctx.editor.setActionKeys("cycleModelForward", this.ctx.keybindings.getKeys("cycleModelForward"));
@@ -372,6 +384,40 @@ export class InputController {
 
 		// Send SIGTSTP to process group (pid=0 means all processes in group)
 		process.kill(0, "SIGTSTP");
+	}
+
+	#handlePauseRender(): void {
+		if (!IS_TERMUX) return;
+		if (this.ctx.ui.isRenderPaused() || this.#renderPausePending) return;
+		this.#renderPausePending = true;
+		const resumeHint = this.ctx.keybindings.getDisplayString("resumeRender") || "Ctrl+Q";
+		this.ctx.statusLine.setHookStatus("render_pause", `Render paused (${resumeHint} to resume)`);
+		this.ctx.ui.requestRender(true);
+		if (!this.#renderPauseUnsubscribe) {
+			this.#renderPauseUnsubscribe = this.ctx.ui.addInputListener(data => {
+				if (this.ctx.keybindings.matches(data, "resumeRender")) {
+					this.#handleResumeRender();
+					return { consume: true };
+				}
+				return { consume: true };
+			});
+		}
+		process.nextTick(() => {
+			if (!this.#renderPausePending || this.ctx.ui.isRenderPaused()) return;
+			this.ctx.ui.pauseRendering();
+		});
+	}
+
+	#handleResumeRender(): void {
+		if (!IS_TERMUX) return;
+		this.#renderPausePending = false;
+		if (this.#renderPauseUnsubscribe) {
+			this.#renderPauseUnsubscribe();
+			this.#renderPauseUnsubscribe = undefined;
+		}
+		this.ctx.statusLine.setHookStatus("render_pause", undefined);
+		this.ctx.ui.resumeRendering();
+		this.ctx.ui.requestRender(true);
 	}
 
 	handleDequeue(): void {

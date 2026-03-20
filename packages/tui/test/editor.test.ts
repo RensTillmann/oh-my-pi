@@ -4,6 +4,7 @@ import { getIndentation } from "@oh-my-pi/pi-utils";
 import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
 import { Editor } from "@oh-my-pi/pi-tui/components/editor";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
+import { getIndentation } from "@oh-my-pi/pi-utils";
 import { defaultEditorTheme } from "./test-themes";
 
 describe("Editor component", () => {
