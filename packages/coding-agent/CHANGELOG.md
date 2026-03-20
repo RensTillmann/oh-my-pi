@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+
+- Added Termux-only render pause/resume hotkeys to freeze UI updates while reviewing scrollback.
 
 ## [13.13.2] - 2026-03-18
 

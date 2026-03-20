@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added render pause/resume support to freeze TUI output (used for Termux scrollback lock).
+
+### Fixed
+
+- Fixed inline editor rendering to expand tabs before display, preventing line wrap artifacts when scrolling.
+
 ## [13.12.0] - 2026-03-14
 
 ### Added

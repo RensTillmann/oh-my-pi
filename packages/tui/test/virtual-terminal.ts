@@ -72,6 +72,14 @@ export class VirtualTerminal implements Terminal {
 		// No-op for virtual terminal
 	}
 
+	pauseBackgroundTasks(): void {
+		// No-op for virtual terminal
+	}
+
+	resumeBackgroundTasks(): void {
+		// No-op for virtual terminal
+	}
+
 	moveBy(lines: number): void {
 		if (lines > 0) {
 			// Move down

@@ -210,6 +210,8 @@ export class TUI extends Container {
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	onDebug?: () => void;
 	#renderRequested = false;
+	#renderPaused = false;
+	#renderPending = false;
 	#cursorRow = 0; // Logical cursor row (end of rendered content)
 	#hardwareCursorRow = 0; // Actual terminal cursor row (may differ due to IME positioning)
 	#viewportTopRow = 0; // Content row currently mapped to screen row 0
@@ -556,6 +558,10 @@ export class TUI extends Container {
 	}
 
 	requestRender(force = false): void {
+		if (this.#renderPaused) {
+			this.#renderPending = true;
+			return;
+		}
 		if (force) {
 			this.#previousLines = [];
 			this.#previousWidth = -1; // -1 triggers widthChanged, forcing a full clear
@@ -570,6 +576,26 @@ export class TUI extends Container {
 			this.#renderRequested = false;
 			this.#doRender();
 		});
+	}
+
+	pauseRendering(): void {
+		if (this.#renderPaused) return;
+		this.#renderPaused = true;
+		this.terminal.pauseBackgroundTasks();
+	}
+
+	resumeRendering(): void {
+		if (!this.#renderPaused) return;
+		this.#renderPaused = false;
+		this.terminal.resumeBackgroundTasks();
+		if (this.#renderPending) {
+			this.#renderPending = false;
+			this.requestRender(true);
+		}
+	}
+
+	isRenderPaused(): boolean {
+		return this.#renderPaused;
 	}
 
 	#handleInput(data: string): void {
@@ -982,6 +1008,10 @@ export class TUI extends Container {
 
 	#doRender(): void {
 		if (this.#stopped) return;
+		if (this.#renderPaused) {
+			this.#renderPending = true;
+			return;
+		}
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
 		let viewportTop = Math.max(0, this.#maxLinesRendered - height);

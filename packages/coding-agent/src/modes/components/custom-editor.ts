@@ -7,6 +7,8 @@ type ConfigurableEditorAction = Extract<
 	| "clear"
 	| "exit"
 	| "suspend"
+	| "pauseRender"
+	| "resumeRender"
 	| "cycleThinkingLevel"
 	| "cycleModelForward"
 	| "cycleModelBackward"
@@ -25,6 +27,8 @@ const DEFAULT_ACTION_KEYS: Record<ConfigurableEditorAction, KeyId[]> = {
 	clear: ["ctrl+c"],
 	exit: ["ctrl+d"],
 	suspend: ["ctrl+z"],
+	pauseRender: ["ctrl+s"],
+	resumeRender: ["ctrl+q"],
 	cycleThinkingLevel: ["shift+tab"],
 	cycleModelForward: ["ctrl+p"],
 	cycleModelBackward: ["shift+ctrl+p"],
@@ -46,6 +50,9 @@ export class CustomEditor extends Editor {
 	shouldBypassAutocompleteOnEscape?: () => boolean;
 	onClear?: () => void;
 	onExit?: () => void;
+	onSuspend?: () => void;
+	onPauseRender?: () => void;
+	onResumeRender?: () => void;
 	onCycleThinkingLevel?: () => void;
 	onCycleModelForward?: () => void;
 	onCycleModelBackward?: () => void;
@@ -54,7 +61,6 @@ export class CustomEditor extends Editor {
 	onToggleThinking?: () => void;
 	onExternalEditor?: () => void;
 	onHistorySearch?: () => void;
-	onSuspend?: () => void;
 	onShowHotkeys?: () => void;
 	onQuickSelectModel?: () => void;
 	/** Called when the configured copy-prompt shortcut is pressed. */
@@ -135,6 +141,16 @@ export class CustomEditor extends Editor {
 		// Intercept configured suspend shortcut
 		if (this.#matchesAction(data, "suspend") && this.onSuspend) {
 			this.onSuspend();
+			return;
+		}
+
+		// Intercept configured render pause/resume shortcuts
+		if (this.#matchesAction(data, "pauseRender") && this.onPauseRender) {
+			this.onPauseRender();
+			return;
+		}
+		if (this.#matchesAction(data, "resumeRender") && this.onResumeRender) {
+			this.onResumeRender();
 			return;
 		}
 
