@@ -94,6 +94,12 @@ export interface Terminal {
 
 	/** The last detected terminal appearance, or undefined if not yet known. */
 	get appearance(): TerminalAppearance | undefined;
+
+	/** Pause background terminal polling (e.g. OSC 11). */
+	pauseBackgroundTasks(): void;
+
+	/** Resume background terminal polling. */
+	resumeBackgroundTasks(): void;
 }
 
 /**
@@ -118,6 +124,7 @@ export class ProcessTerminal implements Terminal {
 	#osc11ResponseBuffer = "";
 	#pendingDa1Sentinels = 0;
 	#osc11PollTimer?: Timer;
+	#osc11PollPaused = false;
 	#mode2031Active = false;
 	#mode2031DebounceTimer?: Timer;
 
@@ -186,6 +193,21 @@ export class ProcessTerminal implements Terminal {
 		// Start periodic OSC 11 re-query for terminals without Mode 2031
 		// (Warp, Alacritty, WezTerm, iTerm2). Self-disables once Mode 2031 fires.
 		this.#startOsc11Poll();
+	}
+
+	pauseBackgroundTasks(): void {
+		if (this.#osc11PollPaused) return;
+		this.#osc11PollPaused = true;
+		this.#stopOsc11Poll();
+	}
+
+	resumeBackgroundTasks(): void {
+		if (!this.#osc11PollPaused) return;
+		this.#osc11PollPaused = false;
+		this.#queryBackgroundColor();
+		if (!this.#dead && !this.#mode2031Active) {
+			this.#startOsc11Poll();
+		}
 	}
 
 	/**
@@ -363,7 +385,7 @@ export class ProcessTerminal implements Terminal {
 	 * the terminal does not support OSC 11.
 	 */
 	#queryBackgroundColor(): void {
-		if (this.#dead) return;
+		if (this.#dead || this.#osc11PollPaused) return;
 		// Queue if an OSC 11 query is in flight or its DA1 sentinel hasn't been
 		// consumed yet. Starting a new query while a DA1 is outstanding would
 		// increment the sentinel counter, and the old DA1 arrival would then
@@ -411,6 +433,7 @@ export class ProcessTerminal implements Terminal {
 	 * Self-disables once Mode 2031 fires (push-based is better than polling).
 	 */
 	#startOsc11Poll(): void {
+		if (this.#osc11PollPaused) return;
 		this.#stopOsc11Poll();
 		this.#osc11PollTimer = setInterval(() => {
 			if (this.#dead) {
@@ -516,6 +539,7 @@ export class ProcessTerminal implements Terminal {
 		this.#osc11ResponseBuffer = "";
 		this.#pendingDa1Sentinels = 0;
 		this.#mode2031Active = false;
+		this.#osc11PollPaused = false;
 
 		// Disable Kitty keyboard protocol if not already done by drainInput()
 		if (this.#kittyProtocolActive) {

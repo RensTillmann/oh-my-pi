@@ -18,6 +18,8 @@ export type AppAction =
 	| "clear"
 	| "exit"
 	| "suspend"
+	| "pauseRender"
+	| "resumeRender"
 	| "cycleThinkingLevel"
 	| "cycleModelForward"
 	| "cycleModelBackward"
@@ -58,6 +60,8 @@ export const DEFAULT_APP_KEYBINDINGS: Record<AppAction, KeyId | KeyId[]> = {
 	clear: "ctrl+c",
 	exit: "ctrl+d",
 	suspend: "ctrl+z",
+	pauseRender: "ctrl+s",
+	resumeRender: "ctrl+q",
 	cycleThinkingLevel: "shift+tab",
 	cycleModelForward: "ctrl+p",
 	cycleModelBackward: "shift+ctrl+p",
@@ -92,6 +96,8 @@ const APP_ACTIONS: AppAction[] = [
 	"clear",
 	"exit",
 	"suspend",
+	"pauseRender",
+	"resumeRender",
 	"cycleThinkingLevel",
 	"cycleModelForward",
 	"cycleModelBackward",

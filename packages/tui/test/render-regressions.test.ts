@@ -65,6 +65,33 @@ describe("TUI terminal-state regressions", () => {
 			}
 		});
 
+		it("freezes output while rendering is paused", async () => {
+			const term = new VirtualTerminal(40, 10);
+			const tui = new TUI(term);
+			const component = new MutableLinesComponent(["one"]);
+			tui.addChild(component);
+
+			try {
+				tui.start();
+				await settle(term);
+				const before = visible(term);
+
+				tui.pauseRendering();
+				component.setLines(["one", "two"]);
+				tui.requestRender();
+				await settle(term);
+				expect(visible(term)).toEqual(before);
+
+				tui.resumeRendering();
+				await settle(term);
+				const after = visible(term);
+				expect(after[0]?.trim()).toBe("one");
+				expect(after[1]?.trim()).toBe("two");
+			} finally {
+				tui.stop();
+			}
+		});
+
 		it("updates only changed middle line without corrupting neighbors", async () => {
 			const term = new VirtualTerminal(40, 10);
 			const tui = new TUI(term);
