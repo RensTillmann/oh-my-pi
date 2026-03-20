@@ -108,11 +108,14 @@ export class InspectorPanel implements Component {
 		const levelLabel = ext.source.level === "user" ? "User" : ext.source.level === "project" ? "Project" : "Native";
 		headerLines.push(`  ${theme.italic(`via ${ext.source.providerName} (${levelLabel})`)}`);
 		const shortened = shortenPath(ext.path, os.homedir());
-		const displayPath =
-			shortened.length > 40 && shortened.split("/").length > 3
-				? `.../${shortened.split("/").slice(-3).join("/")}`
-				: shortened;
-		headerLines.push(`  ${theme.fg("dim", displayPath)}`);
+		// Wrap path to fit the panel width rather than truncating. Hard-break at
+		// (width - 2) to account for the two-space indent. wrapTextWithAnsi handles
+		// paths with no spaces by breaking the single token at the column boundary.
+		const pathAvailWidth = Math.max(1, width - 2);
+		const pathLines = shortened.length > 0 ? wrapTextWithAnsi(shortened, pathAvailWidth) : [""];
+		for (const pLine of pathLines) {
+			headerLines.push(`  ${theme.fg("dim", pLine)}`);
+		}
 		headerLines.push("");
 
 		return headerLines;
