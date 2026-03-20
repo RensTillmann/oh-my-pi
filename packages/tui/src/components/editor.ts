@@ -12,6 +12,7 @@ import {
 	moveWordLeft,
 	moveWordRight,
 	padding,
+	replaceTabs,
 	truncateToWidth,
 	visibleWidth,
 } from "../utils";
@@ -599,18 +600,25 @@ export class Editor implements Component, Focusable {
 		const hintStyle = this.#theme.hintStyle ?? ((t: string) => `\x1b[2m${t}\x1b[0m`);
 
 		for (const layoutLine of visibleLayoutLines) {
-			let displayText = layoutLine.text;
-			let displayWidth = visibleWidth(layoutLine.text);
+			const rawText = layoutLine.text;
+			const hasTabs = rawText.includes("\t");
+			let displayText = hasTabs ? replaceTabs(rawText) : rawText;
+			let displayWidth = visibleWidth(displayText);
 			let cursorInPadding = false;
-
+			
 			// Add cursor if this line has it
 			const hasCursor = layoutLine.hasCursor && layoutLine.cursorPos !== undefined;
 			const marker = emitCursorMarker ? CURSOR_MARKER : "";
+			const rawCursorPos = layoutLine.cursorPos ?? 0;
+			let cursorPos = 0;
+			if (hasCursor) {
+				cursorPos = hasTabs ? replaceTabs(rawText.slice(0, rawCursorPos)).length : rawCursorPos;
+			}
 
 			if (hasCursor && this.#useTerminalCursor) {
 				if (marker) {
-					const before = displayText.slice(0, layoutLine.cursorPos);
-					const after = displayText.slice(layoutLine.cursorPos);
+					const before = displayText.slice(0, cursorPos);
+					const after = displayText.slice(cursorPos);
 					if (after.length === 0 && inlineHint) {
 						const hintText = hintStyle(truncateToWidth(inlineHint, Math.max(0, lineContentWidth - displayWidth)));
 						displayText = before + marker + hintText;
@@ -620,8 +628,8 @@ export class Editor implements Component, Focusable {
 					}
 				}
 			} else if (hasCursor && !this.#useTerminalCursor) {
-				const before = displayText.slice(0, layoutLine.cursorPos);
-				const after = displayText.slice(layoutLine.cursorPos);
+				const before = displayText.slice(0, cursorPos);
+				const after = displayText.slice(cursorPos);
 
 				if (after.length > 0) {
 					// Cursor is on a character (grapheme) - replace it with highlighted version
