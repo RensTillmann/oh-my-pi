@@ -605,7 +605,7 @@ export class Editor implements Component, Focusable {
 			let displayText = hasTabs ? replaceTabs(rawText) : rawText;
 			let displayWidth = visibleWidth(displayText);
 			let cursorInPadding = false;
-			
+
 			// Add cursor if this line has it
 			const hasCursor = layoutLine.hasCursor && layoutLine.cursorPos !== undefined;
 			const marker = emitCursorMarker ? CURSOR_MARKER : "";
