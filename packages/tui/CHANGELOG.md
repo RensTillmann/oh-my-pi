@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed inline editor rendering to expand tabs before display, preventing line wrap artifacts when scrolling.
 
 ## [13.12.0] - 2026-03-14
 

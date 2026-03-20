@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
+import { getIndentation } from "@oh-my-pi/pi-utils";
 import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
 import { Editor } from "@oh-my-pi/pi-tui/components/editor";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
@@ -602,6 +603,25 @@ describe("Editor component", () => {
 				const lineWidth = visibleWidth(lines[i]!);
 				expect(lineWidth).toBeLessThanOrEqual(width);
 			}
+		});
+
+		it("expands tabs before rendering to avoid width drift", () => {
+			const editor = new Editor(defaultEditorTheme);
+			const width = 40;
+
+			editor.setText("\treturn next(input, init);\n\treturn next(input, init);");
+			const lines = editor.render(width);
+
+			for (const line of lines) {
+				expect(line.includes("\t")).toBe(false);
+				expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+			}
+
+			const contentLine = stripVTControlCharacters(lines[1] ?? "");
+			const paddingX = defaultEditorTheme.editorPaddingX ?? 2;
+			const indent = getIndentation();
+			const prefix = `${defaultEditorTheme.symbols.boxRound.vertical}${" ".repeat(paddingX)}${indent}return next(input, init);`;
+			expect(contentLine.startsWith(prefix)).toBe(true);
 		});
 
 		it("wraps long text with emojis at correct positions", () => {
