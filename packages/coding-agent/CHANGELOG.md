@@ -4,7 +4,22 @@
 
 ### Added
 
+- Added `/reload` slash command for full session restart with process re-exec
+- Added `faster-whisper` as an alternative STT backend (`stt.backend` setting)
+- Added `parecord` (PulseAudio) as a supported audio recording tool for STT
+- Added `browser.screenshotDir` setting to configure screenshot save directory with path expansion
+- Added extension dashboard with tabbed layout, inventory list, and inspector panel
+- Added extension dashboard actions: delete (D), rename (N), move (M), open source (E), restrict/unrestrict (R)
+- Added bulk category toggle, `/` search filter, layout toggle (V), and inspector preview scrolling (PgUp/PgDn) to extension dashboard
+- Added project-scoped extension disabling stored in `.omp/settings.json`
+- Added APPEND_SYSTEM.md prompt tab editor in extension dashboard
+- Added extension category sorting by item count (ascending)
 - Added Termux-only render pause/resume hotkeys to freeze UI updates while reviewing scrollback.
+
+### Changed
+
+- Improved extension restriction toggle to gate on eligible extension kinds
+- Reordered system prompt tab position in extension dashboard
 
 ## [13.13.2] - 2026-03-18
 
