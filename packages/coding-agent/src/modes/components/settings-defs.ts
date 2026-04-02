@@ -117,6 +117,15 @@ const OPTION_PROVIDERS: Partial<Record<SettingPath, OptionProvider>> = {
 		{ value: "5", label: "5 retries" },
 		{ value: "10", label: "10 retries" },
 	],
+	// Retry fallback revert policy
+	"retry.fallbackRevertPolicy": [
+		{
+			value: "cooldown-expiry",
+			label: "Cooldown expiry",
+			description: "Return to the primary model after its suppression window ends",
+		},
+		{ value: "never", label: "Never", description: "Stay on the fallback model until manually changed" },
+	],
 	// Task max concurrency
 	"task.maxConcurrency": [
 		{ value: "0", label: "Unlimited" },
@@ -301,10 +310,6 @@ const OPTION_PROVIDERS: Partial<Record<SettingPath, OptionProvider>> = {
 		{ value: "tavily", label: "Tavily", description: "Requires TAVILY_API_KEY" },
 		{ value: "kagi", label: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access" },
 		{ value: "synthetic", label: "Synthetic", description: "Requires SYNTHETIC_API_KEY" },
-	],
-	"providers.codeSearch": [
-		{ value: "exa", label: "Exa", description: "Uses Exa public MCP code search" },
-		{ value: "grep", label: "grep.app", description: "Uses Vercel grep.app public code search" },
 	],
 	"providers.image": [
 		{ value: "auto", label: "Auto", description: "Priority: OpenRouter > Gemini" },

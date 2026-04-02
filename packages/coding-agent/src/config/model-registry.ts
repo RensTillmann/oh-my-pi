@@ -28,8 +28,10 @@ import {
 import { isRecord, logger } from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
 import { type ConfigError, ConfigFile } from "../config";
-import type { ThemeColor } from "../modes/theme/theme";
+import { parseModelString } from "../config/model-resolver";
+import { isValidThemeColor, type ThemeColor } from "../modes/theme/theme";
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
+import { type Settings, settings } from "./settings";
 
 export const kNoAuth = "N/A";
 
@@ -56,6 +58,53 @@ export const MODEL_ROLES: Record<ModelRole, ModelRoleInfo> = {
 };
 
 export const MODEL_ROLE_IDS: ModelRole[] = ["default", "smol", "slow", "vision", "plan", "commit", "task"];
+
+/** Alias for ModelRoleInfo - used for both built-in and custom roles */
+export type RoleInfo = ModelRoleInfo;
+
+/**
+ * Return the canonical set of known roles for selector/carousel UI.
+ *
+ * Built-ins always come first. Configured cycle order, model assignments, and
+ * tag metadata can introduce additional custom roles without requiring duplicate
+ * entries across settings.
+ */
+export function getKnownRoleIds(settings: Settings): string[] {
+	const roles = [...MODEL_ROLE_IDS] as string[];
+	const seen = new Set<string>(roles);
+	const addRole = (role: string) => {
+		if (seen.has(role)) return;
+		seen.add(role);
+		roles.push(role);
+	};
+
+	for (const role of settings.get("cycleOrder")) addRole(role);
+	for (const role of Object.keys(settings.getModelRoles())) addRole(role);
+	for (const role of Object.keys(settings.get("modelTags"))) addRole(role);
+
+	return roles;
+}
+
+/**
+ * Get role info for a role name (built-in or custom).
+ * Configured metadata overrides built-in defaults when present.
+ */
+export function getRoleInfo(role: string, settings: Settings): RoleInfo {
+	const builtIn = role in MODEL_ROLES ? MODEL_ROLES[role as ModelRole] : undefined;
+	const configured = settings.get("modelTags")[role];
+
+	if (configured) {
+		return {
+			tag: builtIn?.tag,
+			name: configured.name || builtIn?.name || role,
+			color: configured.color && isValidThemeColor(configured.color) ? configured.color : builtIn?.color,
+		};
+	}
+
+	if (builtIn) return builtIn;
+
+	return { name: role, color: "muted" };
+}
 
 const OpenRouterRoutingSchema = Type.Object({
 	only: Type.Optional(Type.Array(Type.String())),
@@ -90,6 +139,7 @@ const OpenAICompatSchema = Type.Object({
 	thinkingFormat: Type.Optional(
 		Type.Union([
 			Type.Literal("openai"),
+			Type.Literal("openrouter"),
 			Type.Literal("zai"),
 			Type.Literal("qwen"),
 			Type.Literal("qwen-chat-template"),
@@ -356,7 +406,7 @@ export interface ProviderDiscoveryState {
 
 /** Result of loading custom models from models.json */
 interface CustomModelsResult {
-	models?: Model<Api>[];
+	models?: CustomModelOverlay[];
 	overrides?: Map<string, ProviderOverride>;
 	modelOverrides?: Map<string, Map<string, ModelOverride>>;
 	keylessProviders?: Set<string>;
@@ -551,6 +601,24 @@ interface CustomModelBuildOptions {
 	useDefaults: boolean;
 }
 
+type CustomModelOverlay = {
+	id: string;
+	provider: string;
+	api: Api;
+	baseUrl: string;
+	name?: string;
+	reasoning?: boolean;
+	thinking?: ThinkingConfig;
+	input?: ("text" | "image")[];
+	cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+	contextWindow?: number;
+	maxTokens?: number;
+	headers?: Record<string, string>;
+	compat?: Model<Api>["compat"];
+	contextPromotionTarget?: string;
+	premiumMultiplier?: number;
+};
+
 function mergeCustomModelHeaders(
 	providerHeaders: Record<string, string> | undefined,
 	modelHeaders: Record<string, string> | undefined,
@@ -567,6 +635,68 @@ function mergeCustomModelHeaders(
 	return headers;
 }
 
+function buildCustomModelOverlay(
+	providerName: string,
+	providerBaseUrl: string,
+	providerApi: Api | undefined,
+	providerHeaders: Record<string, string> | undefined,
+	providerApiKey: string | undefined,
+	authHeader: boolean | undefined,
+	providerCompat: Model<Api>["compat"] | undefined,
+	modelDef: CustomModelDefinitionLike,
+): CustomModelOverlay | undefined {
+	const api = modelDef.api ?? providerApi;
+	if (!api) return undefined;
+	return {
+		id: modelDef.id,
+		provider: providerName,
+		api,
+		baseUrl: modelDef.baseUrl ?? providerBaseUrl,
+		name: modelDef.name,
+		reasoning: modelDef.reasoning,
+		thinking: modelDef.thinking as ThinkingConfig | undefined,
+		input: modelDef.input as ("text" | "image")[] | undefined,
+		cost: modelDef.cost,
+		contextWindow: modelDef.contextWindow,
+		maxTokens: modelDef.maxTokens,
+		headers: mergeCustomModelHeaders(providerHeaders, modelDef.headers, authHeader, providerApiKey),
+		compat: mergeCompat(providerCompat, modelDef.compat),
+		contextPromotionTarget: modelDef.contextPromotionTarget,
+		premiumMultiplier: modelDef.premiumMultiplier,
+	};
+}
+
+function applyStandaloneCustomModelPolicies(model: CustomModelOverlay): CustomModelOverlay {
+	if (model.id !== "gpt-5.4" || model.provider === "github-copilot" || model.contextWindow !== undefined) {
+		return model;
+	}
+	return { ...model, contextWindow: 1_000_000 };
+}
+
+function finalizeCustomModel(model: CustomModelOverlay, options: CustomModelBuildOptions): Model<Api> {
+	const resolvedModel = options.useDefaults ? applyStandaloneCustomModelPolicies(model) : model;
+	const cost =
+		resolvedModel.cost ?? (options.useDefaults ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } : undefined);
+	const input = resolvedModel.input ?? (options.useDefaults ? ["text"] : undefined);
+	return enrichModelThinking({
+		id: resolvedModel.id,
+		name: resolvedModel.name ?? (options.useDefaults ? resolvedModel.id : undefined),
+		api: resolvedModel.api,
+		provider: resolvedModel.provider,
+		baseUrl: resolvedModel.baseUrl,
+		reasoning: resolvedModel.reasoning ?? (options.useDefaults ? false : undefined),
+		thinking: resolvedModel.thinking,
+		input: input as ("text" | "image")[],
+		cost,
+		contextWindow: resolvedModel.contextWindow ?? (options.useDefaults ? 128000 : undefined),
+		maxTokens: resolvedModel.maxTokens ?? (options.useDefaults ? 16384 : undefined),
+		headers: resolvedModel.headers,
+		compat: resolvedModel.compat,
+		contextPromotionTarget: resolvedModel.contextPromotionTarget,
+		premiumMultiplier: resolvedModel.premiumMultiplier,
+	} as Model<Api>);
+}
+
 function buildCustomModel(
 	providerName: string,
 	providerBaseUrl: string,
@@ -578,28 +708,34 @@ function buildCustomModel(
 	modelDef: CustomModelDefinitionLike,
 	options: CustomModelBuildOptions,
 ): Model<Api> | undefined {
-	const api = modelDef.api ?? providerApi;
-	if (!api) return undefined;
-	const withDefaults = options.useDefaults;
-	const cost = modelDef.cost ?? (withDefaults ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } : undefined);
-	const input = modelDef.input ?? (withDefaults ? ["text"] : undefined);
-	return enrichModelThinking({
-		id: modelDef.id,
-		name: modelDef.name ?? (withDefaults ? modelDef.id : undefined),
-		api,
-		provider: providerName,
-		baseUrl: modelDef.baseUrl ?? providerBaseUrl,
-		reasoning: modelDef.reasoning ?? (withDefaults ? false : undefined),
-		thinking: modelDef.thinking as ThinkingConfig | undefined,
-		input: input as ("text" | "image")[],
-		cost,
-		contextWindow: modelDef.contextWindow ?? (withDefaults ? 128000 : undefined),
-		maxTokens: modelDef.maxTokens ?? (withDefaults ? 16384 : undefined),
-		headers: mergeCustomModelHeaders(providerHeaders, modelDef.headers, authHeader, providerApiKey),
-		compat: mergeCompat(providerCompat, modelDef.compat),
-		contextPromotionTarget: modelDef.contextPromotionTarget,
-		premiumMultiplier: modelDef.premiumMultiplier,
-	} as Model<Api>);
+	const model = buildCustomModelOverlay(
+		providerName,
+		providerBaseUrl,
+		providerApi,
+		providerHeaders,
+		providerApiKey,
+		authHeader,
+		providerCompat,
+		modelDef,
+	);
+	if (!model) return undefined;
+	return finalizeCustomModel(model, options);
+}
+
+function normalizeSuppressedSelector(selector: string): string {
+	const trimmed = selector.trim();
+	if (!trimmed) return trimmed;
+	const parsed = parseModelString(trimmed);
+	if (!parsed) return trimmed;
+	return `${parsed.provider}/${parsed.id}`;
+}
+
+function getDisabledProviderIdsFromSettings(): Set<string> {
+	try {
+		return new Set(settings.get("disabledProviders"));
+	} catch {
+		return new Set();
+	}
 }
 
 /**
@@ -610,12 +746,15 @@ export class ModelRegistry {
 	#customProviderApiKeys: Map<string, string> = new Map();
 	#keylessProviders: Set<string> = new Set();
 	#discoverableProviders: DiscoveryProviderConfig[] = [];
+	#customModelOverlays: CustomModelOverlay[] = [];
+	#providerOverrides: Map<string, ProviderOverride> = new Map();
 	#modelOverrides: Map<string, Map<string, ModelOverride>> = new Map();
 	#configError: ConfigError | undefined = undefined;
 	#modelsConfigFile: ConfigFile<ModelsConfig>;
 	#registeredProviderSources: Set<string> = new Set();
 	#providerDiscoveryStates: Map<string, ProviderDiscoveryState> = new Map();
 	#cacheDbPath?: string;
+	#suppressedSelectors: Map<string, number> = new Map();
 	#backgroundRefresh?: Promise<void>;
 	#lastDiscoveryWarnings: Map<string, string> = new Map();
 
@@ -645,6 +784,7 @@ export class ModelRegistry {
 	 */
 	async refresh(strategy: ModelRefreshStrategy = "online-if-uncached"): Promise<void> {
 		this.#reloadStaticModels();
+		this.#suppressedSelectors.clear();
 		await this.#refreshRuntimeDiscoveries(strategy);
 	}
 
@@ -668,6 +808,11 @@ export class ModelRegistry {
 
 	async refreshProvider(providerId: string, strategy: ModelRefreshStrategy = "online"): Promise<void> {
 		this.#reloadStaticModels();
+		for (const selector of this.#suppressedSelectors.keys()) {
+			if (selector.startsWith(`${providerId}/`)) {
+				this.#suppressedSelectors.delete(selector);
+			}
+		}
 		await this.#refreshRuntimeDiscoveries(strategy, new Set([providerId]));
 	}
 
@@ -676,6 +821,7 @@ export class ModelRegistry {
 		this.#customProviderApiKeys.clear();
 		this.#keylessProviders.clear();
 		this.#discoverableProviders = [];
+		this.#providerOverrides.clear();
 		this.#modelOverrides.clear();
 		this.#configError = undefined;
 		this.#providerDiscoveryStates.clear();
@@ -703,54 +849,83 @@ export class ModelRegistry {
 		this.#configError = configError;
 		this.#keylessProviders = keylessProviders;
 		this.#discoverableProviders = discoverableProviders;
+		this.#customModelOverlays = customModels;
+		this.#providerOverrides = overrides;
 		this.#modelOverrides = modelOverrides;
 
 		this.#addImplicitDiscoverableProviders(configuredProviders);
-		const builtInModels = this.#loadBuiltInModels(overrides, modelOverrides);
-		const cachedDiscoveries = this.#loadCachedDiscoverableModels();
-		const combined = this.#mergeCustomModels(builtInModels, [...customModels, ...cachedDiscoveries]);
+		const builtInModels = this.#applyHardcodedModelPolicies(this.#loadBuiltInModels(overrides));
+		const cachedDiscoveries = this.#applyHardcodedModelPolicies(this.#loadCachedDiscoverableModels());
+		const resolvedDefaults = this.#mergeResolvedModels(builtInModels, cachedDiscoveries);
+		const combined = this.#mergeCustomModels(resolvedDefaults, this.#customModelOverlays);
 
-		this.#models = this.#applyHardcodedModelPolicies(combined);
+		this.#models = this.#applyModelOverrides(combined, this.#modelOverrides);
 	}
 
-	/** Load built-in models, applying provider and per-model overrides */
-	#loadBuiltInModels(
-		overrides: Map<string, ProviderOverride>,
-		modelOverrides: Map<string, Map<string, ModelOverride>>,
-	): Model<Api>[] {
+	/** Load built-in models, applying provider-level overrides only.
+	 *  Per-model overrides are applied later by #applyModelOverrides. */
+	#loadBuiltInModels(overrides: Map<string, ProviderOverride>): Model<Api>[] {
 		return getBundledProviders().flatMap(provider => {
 			const models = getBundledModels(provider as Parameters<typeof getBundledModels>[0]) as Model<Api>[];
 			const providerOverride = overrides.get(provider);
-			const perModelOverrides = modelOverrides.get(provider);
 
 			return models.map(m => {
-				let model = m;
-				if (providerOverride) {
-					model = {
-						...model,
-						baseUrl: providerOverride.baseUrl ?? model.baseUrl,
-						headers: providerOverride.headers ? { ...model.headers, ...providerOverride.headers } : model.headers,
-						compat: mergeCompat(model.compat, providerOverride.compat),
-					};
-				}
-				const modelOverride = perModelOverrides?.get(m.id);
-				if (modelOverride) {
-					model = applyModelOverride(model, modelOverride);
-				}
-				return model;
+				if (!providerOverride) return m;
+				return {
+					...m,
+					baseUrl: providerOverride.baseUrl ?? m.baseUrl,
+					headers: providerOverride.headers ? { ...m.headers, ...providerOverride.headers } : m.headers,
+					compat: mergeCompat(m.compat, providerOverride.compat),
+				};
 			});
 		});
 	}
 
+	#mergeResolvedModels(baseModels: Model<Api>[], replacementModels: Model<Api>[]): Model<Api>[] {
+		const merged = [...baseModels];
+		for (const replacementModel of replacementModels) {
+			const existingIndex = merged.findIndex(
+				m => m.provider === replacementModel.provider && m.id === replacementModel.id,
+			);
+			if (existingIndex >= 0) {
+				merged[existingIndex] = replacementModel;
+			} else {
+				merged.push(replacementModel);
+			}
+		}
+		return merged;
+	}
+
 	/** Merge custom models with built-in, replacing by provider+id match */
-	#mergeCustomModels(builtInModels: Model<Api>[], customModels: Model<Api>[]): Model<Api>[] {
+	#mergeCustomModels(builtInModels: Model<Api>[], customModels: CustomModelOverlay[]): Model<Api>[] {
 		const merged = [...builtInModels];
 		for (const customModel of customModels) {
 			const existingIndex = merged.findIndex(m => m.provider === customModel.provider && m.id === customModel.id);
 			if (existingIndex >= 0) {
-				merged[existingIndex] = customModel;
+				const existingModel = merged[existingIndex];
+				merged[existingIndex] = enrichModelThinking({
+					...existingModel,
+					id: customModel.id,
+					provider: customModel.provider,
+					api: customModel.api,
+					baseUrl: customModel.baseUrl,
+					name: customModel.name ?? existingModel.name,
+					reasoning: customModel.reasoning ?? existingModel.reasoning,
+					thinking: customModel.thinking ?? existingModel.thinking,
+					input: customModel.input ?? existingModel.input,
+					cost: customModel.cost ?? existingModel.cost,
+					contextWindow: customModel.contextWindow ?? existingModel.contextWindow,
+					maxTokens: customModel.maxTokens ?? existingModel.maxTokens,
+					// Same-id custom definitions replace bundled transport behavior. Provider-level
+					// headers/compat were already folded into customModel during parsing; do not
+					// re-merge bundled transport metadata here.
+					headers: customModel.headers,
+					compat: customModel.compat,
+					contextPromotionTarget: customModel.contextPromotionTarget ?? existingModel.contextPromotionTarget,
+					premiumMultiplier: customModel.premiumMultiplier ?? existingModel.premiumMultiplier,
+				} as Model<Api>);
 			} else {
-				merged.push(customModel);
+				merged.push(finalizeCustomModel(customModel, { useDefaults: true }));
 			}
 		}
 		return merged;
@@ -935,22 +1110,31 @@ export class ModelRegistry {
 		if (discovered.length === 0) {
 			return;
 		}
-		const merged = this.#mergeCustomModels(
-			this.#models,
+		const discoveredModels = this.#applyHardcodedModelPolicies(
 			discovered.map(model => {
-				const existing =
-					this.find(model.provider, model.id) ??
-					this.#models.find(candidate => candidate.provider === model.provider);
-				return existing
+				const existing = this.find(model.provider, model.id);
+				if (existing) {
+					return {
+						...model,
+						baseUrl: existing.baseUrl,
+						headers: existing.headers ? { ...existing.headers, ...model.headers } : model.headers,
+					};
+				}
+				const providerOverride = this.#providerOverrides.get(model.provider);
+				return providerOverride
 					? {
 							...model,
-							baseUrl: existing.baseUrl,
-							headers: existing.headers ? { ...existing.headers, ...model.headers } : model.headers,
+							baseUrl: providerOverride.baseUrl ?? model.baseUrl,
+							headers: providerOverride.headers
+								? { ...model.headers, ...providerOverride.headers }
+								: model.headers,
 						}
 					: model;
 			}),
 		);
-		this.#models = this.#applyHardcodedModelPolicies(this.#applyModelOverrides(merged, this.#modelOverrides));
+		const resolved = this.#mergeResolvedModels(this.#models, discoveredModels);
+		const combined = this.#mergeCustomModels(resolved, this.#customModelOverlays);
+		this.#models = this.#applyModelOverrides(combined, this.#modelOverrides);
 	}
 
 	async #discoverProviderModels(
@@ -1440,15 +1624,22 @@ export class ModelRegistry {
 	}
 	#applyHardcodedModelPolicies(models: Model<Api>[]): Model<Api>[] {
 		return models.map(model => {
-			if (model.id === "gpt-5.4" && model.provider !== "github-copilot") {
-				return { ...model, contextWindow: 1_000_000 };
+			if (model.id !== "gpt-5.4" || model.provider === "github-copilot") {
+				return model;
 			}
-			return model;
+			const overrides = this.#modelOverrides.get(model.provider)?.get(model.id);
+			if (!overrides) {
+				return applyModelOverride(model, { contextWindow: 1_000_000 });
+			}
+			return applyModelOverride(model, {
+				contextWindow: overrides.contextWindow ?? 1_000_000,
+				...overrides,
+			});
 		});
 	}
 
-	#parseModels(config: ModelsConfig): Model<Api>[] {
-		const models: Model<Api>[] = [];
+	#parseModels(config: ModelsConfig): CustomModelOverlay[] {
+		const models: CustomModelOverlay[] = [];
 
 		for (const [providerName, providerConfig] of Object.entries(config.providers)) {
 			const modelDefs = providerConfig.models ?? [];
@@ -1457,7 +1648,7 @@ export class ModelRegistry {
 				this.#customProviderApiKeys.set(providerName, providerConfig.apiKey);
 			}
 			for (const modelDef of modelDefs) {
-				const model = buildCustomModel(
+				const model = buildCustomModelOverlay(
 					providerName,
 					providerConfig.baseUrl!,
 					providerConfig.api as Api | undefined,
@@ -1466,7 +1657,6 @@ export class ModelRegistry {
 					providerConfig.authHeader,
 					providerConfig.compat,
 					modelDef as CustomModelDefinitionLike,
-					{ useDefaults: true },
 				);
 				if (!model) continue;
 				models.push(model);
@@ -1488,11 +1678,19 @@ export class ModelRegistry {
 	 * This is a fast check that doesn't refresh OAuth tokens.
 	 */
 	getAvailable(): Model<Api>[] {
-		return this.#models.filter(m => this.#keylessProviders.has(m.provider) || this.authStorage.hasAuth(m.provider));
+		const disabledProviders = getDisabledProviderIdsFromSettings();
+		return this.#models.filter(
+			m =>
+				!disabledProviders.has(m.provider) &&
+				(this.#keylessProviders.has(m.provider) || this.authStorage.hasAuth(m.provider)),
+		);
 	}
 
 	getDiscoverableProviders(): string[] {
-		return this.#discoverableProviders.map(provider => provider.provider);
+		const disabledProviders = getDisabledProviderIdsFromSettings();
+		return this.#discoverableProviders
+			.filter(provider => !disabledProviders.has(provider.provider))
+			.map(provider => provider.provider);
 	}
 
 	getProviderDiscoveryState(provider: string): ProviderDiscoveryState | undefined {
@@ -1628,7 +1826,7 @@ export class ModelRegistry {
 					config.authHeader,
 					config.compat,
 					modelDef as CustomModelDefinitionLike,
-					{ useDefaults: false },
+					{ useDefaults: true },
 				);
 				if (!model) {
 					throw new Error(`Provider ${providerName}, model ${modelDef.id}: no "api" specified.`);
@@ -1658,6 +1856,27 @@ export class ModelRegistry {
 				};
 			});
 		}
+	}
+
+	/**
+	 * Suppress a specific model selector (e.g., "provider/id") until a specific timestamp.
+	 */
+	suppressSelector(selector: string, untilMs: number): void {
+		this.#suppressedSelectors.set(normalizeSuppressedSelector(selector), untilMs);
+	}
+
+	/**
+	 * Check if a model selector is currently suppressed due to rate limits.
+	 */
+	isSelectorSuppressed(selector: string): boolean {
+		const normalizedSelector = normalizeSuppressedSelector(selector);
+		const suppressedUntil = this.#suppressedSelectors.get(normalizedSelector);
+		if (!suppressedUntil) return false;
+		if (suppressedUntil <= Date.now()) {
+			this.#suppressedSelectors.delete(normalizedSelector);
+			return false;
+		}
+		return true;
 	}
 }
 

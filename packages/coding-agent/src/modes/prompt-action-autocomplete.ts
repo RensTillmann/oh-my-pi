@@ -1,8 +1,9 @@
+import type { SearchDb } from "@oh-my-pi/pi-natives";
 import {
 	type AutocompleteItem,
 	type AutocompleteProvider,
 	CombinedAutocompleteProvider,
-	getEditorKeybindings,
+	getKeybindings,
 	type SlashCommand,
 } from "@oh-my-pi/pi-tui";
 import { formatKeyHints, type KeybindingsManager } from "../config/keybindings";
@@ -23,6 +24,7 @@ interface PromptActionAutocompleteItem extends AutocompleteItem {
 interface PromptActionAutocompleteOptions {
 	commands: SlashCommand[];
 	basePath: string;
+	searchDb?: SearchDb;
 	keybindings: KeybindingsManager;
 	copyCurrentLine: () => void;
 	copyPrompt: () => void;
@@ -90,8 +92,8 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 	#baseProvider: CombinedAutocompleteProvider;
 	#actions: PromptActionDefinition[];
 
-	constructor(commands: SlashCommand[], basePath: string, actions: PromptActionDefinition[]) {
-		this.#baseProvider = new CombinedAutocompleteProvider(commands, basePath);
+	constructor(commands: SlashCommand[], basePath: string, actions: PromptActionDefinition[], searchDb?: SearchDb) {
+		this.#baseProvider = new CombinedAutocompleteProvider(commands, basePath, searchDb);
 		this.#actions = actions;
 	}
 
@@ -174,26 +176,26 @@ export class PromptActionAutocompleteProvider implements AutocompleteProvider {
 export function createPromptActionAutocompleteProvider(
 	options: PromptActionAutocompleteOptions,
 ): PromptActionAutocompleteProvider {
-	const editorKeybindings = getEditorKeybindings();
+	const editorKeybindings = getKeybindings();
 	const actions: PromptActionDefinition[] = [
 		{
 			id: "copy-line",
 			label: "Copy current line",
-			description: formatKeyHints(options.keybindings.getKeys("copyLine")),
+			description: formatKeyHints(options.keybindings.getKeys("app.clipboard.copyLine")),
 			keywords: ["copy", "line", "clipboard", "current"],
 			execute: options.copyCurrentLine,
 		},
 		{
 			id: "copy-prompt",
 			label: "Copy whole prompt",
-			description: formatKeyHints(options.keybindings.getKeys("copyPrompt")),
+			description: formatKeyHints(options.keybindings.getKeys("app.clipboard.copyPrompt")),
 			keywords: ["copy", "prompt", "clipboard", "message"],
 			execute: options.copyPrompt,
 		},
 		{
 			id: "undo",
 			label: "Undo",
-			description: formatKeyHints(editorKeybindings.getKeys("undo")),
+			description: formatKeyHints(editorKeybindings.getKeys("tui.editor.undo")),
 			keywords: ["undo", "revert", "edit", "history"],
 			execute: options.undo,
 		},
@@ -214,18 +216,18 @@ export function createPromptActionAutocompleteProvider(
 		{
 			id: "cursor-line-start",
 			label: "Move cursor to beginning of line",
-			description: formatKeyHints(editorKeybindings.getKeys("cursorLineStart")),
+			description: formatKeyHints(editorKeybindings.getKeys("tui.editor.cursorLineStart")),
 			keywords: ["move", "cursor", "line", "start", "beginning", "home"],
 			execute: options.moveCursorToLineStart,
 		},
 		{
 			id: "cursor-line-end",
 			label: "Move cursor to end of line",
-			description: formatKeyHints(editorKeybindings.getKeys("cursorLineEnd")),
+			description: formatKeyHints(editorKeybindings.getKeys("tui.editor.cursorLineEnd")),
 			keywords: ["move", "cursor", "line", "end"],
 			execute: options.moveCursorToLineEnd,
 		},
 	];
 
-	return new PromptActionAutocompleteProvider(options.commands, options.basePath, actions);
+	return new PromptActionAutocompleteProvider(options.commands, options.basePath, actions, options.searchDb);
 }

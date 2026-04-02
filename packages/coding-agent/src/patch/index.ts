@@ -97,8 +97,12 @@ const patchEditSchema = Type.Object({
 export type ReplaceParams = Static<typeof replaceEditSchema>;
 export type PatchParams = Static<typeof patchEditSchema>;
 
-/** Pattern matching hashline display format prefixes: `LINE#ID:CONTENT` and `#ID:CONTENT` */
-const HASHLINE_PREFIX_RE = /^\s*(?:>>>|>>)?\s*(?:\d+\s*#\s*|#\s*)[ZPMQVRWSNKTXJBYH]{2}:/;
+/**
+ * Pattern matching hashline display format prefixes: `LINE#ID:CONTENT`, `#ID:CONTENT`, and `+ID:CONTENT`.
+ * A plus-prefixed form appears in diff-like output and should be treated as hashline metadata too.
+ */
+const HASHLINE_PREFIX_RE = /^\s*(?:>>>|>>)?\s*(?:\+?\s*(?:\d+\s*#\s*|#\s*)|\+)\s*[ZPMQVRWSNKTXJBYH]{2}:/;
+const HASHLINE_PREFIX_PLUS_RE = /^\s*(?:>>>|>>)?\s*\+\s*(?:\d+\s*#\s*|#\s*)?[ZPMQVRWSNKTXJBYH]{2}:/;
 
 /** Pattern matching a unified-diff added-line `+` prefix (but not `++`). Does NOT match `-` to avoid corrupting Markdown list items. */
 const DIFF_PLUS_RE = /^[+](?![+])/;
@@ -111,27 +115,31 @@ const DIFF_PLUS_RE = /^[+](?![+])/;
  * output file. This strips them heuristically before application.
  */
 export function stripNewLinePrefixes(lines: string[]): string[] {
-	// Hashline prefixes are highly specific to read output and should only be
-	// stripped when *every* non-empty line carries one.
-	// Diff '+' markers can be legitimate content less often, so keep majority mode.
+	// Hashline prefixes are highly specific to read output and are usually stripped only when
+	// *every* non-empty line carries one. If a line is prefixed as `+ID:`, strip that
+	// prefix while leaving other `+` lines untouched to avoid corrupting mixed snippets.
 	let hashPrefixCount = 0;
+	let diffPlusHashPrefixCount = 0;
 	let diffPlusCount = 0;
 	let nonEmpty = 0;
 	for (const l of lines) {
 		if (l.length === 0) continue;
 		nonEmpty++;
 		if (HASHLINE_PREFIX_RE.test(l)) hashPrefixCount++;
+		if (HASHLINE_PREFIX_PLUS_RE.test(l)) diffPlusHashPrefixCount++;
 		if (DIFF_PLUS_RE.test(l)) diffPlusCount++;
 	}
 	if (nonEmpty === 0) return lines;
 
 	const stripHash = hashPrefixCount > 0 && hashPrefixCount === nonEmpty;
-	const stripPlus = !stripHash && diffPlusCount > 0 && diffPlusCount >= nonEmpty * 0.5;
-	if (!stripHash && !stripPlus) return lines;
+	const stripPlus =
+		!stripHash && diffPlusHashPrefixCount === 0 && diffPlusCount > 0 && diffPlusCount >= nonEmpty * 0.5;
+	if (!stripHash && !stripPlus && diffPlusHashPrefixCount === 0) return lines;
 
 	return lines.map(l => {
 		if (stripHash) return l.replace(HASHLINE_PREFIX_RE, "");
 		if (stripPlus) return l.replace(DIFF_PLUS_RE, "");
+		if (diffPlusHashPrefixCount > 0 && HASHLINE_PREFIX_PLUS_RE.test(l)) return l.replace(HASHLINE_PREFIX_RE, "");
 		return l;
 	});
 }
@@ -166,16 +174,32 @@ export function hashlineParseText(edit: string[] | string | null): string[] {
 	return stripNewLinePrefixes(edit);
 }
 
+const linesSchema = Type.Union([
+	Type.Array(Type.String(), { description: "content (preferred format)" }),
+	Type.String(),
+	Type.Null(),
+]);
+
+const locSchema = Type.Union(
+	[
+		Type.Literal("append"),
+		Type.Literal("prepend"),
+		Type.Object({ append: Type.String({ description: "anchor" }) }),
+		Type.Object({ prepend: Type.String({ description: "anchor" }) }),
+		Type.Object({
+			range: Type.Object({
+				pos: Type.String({ description: "first line to edit (inclusive)" }),
+				end: Type.String({ description: "last line to edit (inclusive)" }),
+			}),
+		}),
+	],
+	{ description: "insert location" },
+);
+
 const hashlineEditSchema = Type.Object(
 	{
-		op: StringEnum(["replace", "append", "prepend"]),
-		pos: Type.Optional(Type.String({ description: "anchor" })),
-		end: Type.Optional(Type.String({ description: "limit position" })),
-		lines: Type.Union([
-			Type.Array(Type.String(), { description: "content (preferred format)" }),
-			Type.String(),
-			Type.Null(),
-		]),
+		loc: locSchema,
+		content: linesSchema,
 	},
 	{ additionalProperties: false },
 );
@@ -198,45 +222,43 @@ export type HashlineParams = Static<typeof hashlineEditParamsSchema>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Map flat tool-schema edits (tag/end) into typed HashlineEdit objects.
+ * Map loc/content tool-schema edits into typed HashlineEdit objects.
  *
- * Resilient: as long as at least one anchor exists, we execute.
- * - replace + tag only → single-line replace
- * - replace + tag + end → range replace
- * - append + tag or end → append after that anchor
- * - prepend + tag or end → prepend before that anchor
- * - no anchors → file-level append/prepend (only for those ops)
- *
- * Unknown ops default to "replace".
+ * Each edit entry has a `loc` (where to edit) and `content` (what to insert/replace).
+ * loc can be:
+ *   - "append" / "prepend" — file-level insert
+ *   - { append: anchor } / { prepend: anchor } — insert relative to anchor
+ *   - { range: { pos, end } } — replace inclusive range
  */
 function resolveEditAnchors(edits: HashlineToolEdit[]): HashlineEdit[] {
 	const result: HashlineEdit[] = [];
 	for (const edit of edits) {
-		const lines = hashlineParseText(edit.lines);
-		const tag = edit.pos ? tryParseTag(edit.pos) : undefined;
-		const end = edit.end ? tryParseTag(edit.end) : undefined;
+		const lines = hashlineParseText(edit.content);
+		const loc = edit.loc;
 
-		// Normalize op — default unknown values to "replace"
-		const op = edit.op === "append" || edit.op === "prepend" ? edit.op : "replace";
-		switch (op) {
-			case "replace": {
-				if (tag && end) {
-					result.push({ op: "replace", pos: tag, end, lines });
-				} else if (tag || end) {
-					result.push({ op: "replace", pos: tag || end!, lines });
-				} else {
-					throw new Error("Replace requires at least one anchor (tag or end).");
-				}
-				break;
+		if (loc === "append") {
+			result.push({ op: "append_file", lines });
+		} else if (loc === "prepend") {
+			result.push({ op: "prepend_file", lines });
+		} else if (typeof loc === "object") {
+			if ("append" in loc) {
+				const anchor = tryParseTag(loc.append);
+				if (!anchor) throw new Error("append requires a valid anchor.");
+				result.push({ op: "append_at", pos: anchor, lines });
+			} else if ("prepend" in loc) {
+				const anchor = tryParseTag(loc.prepend);
+				if (!anchor) throw new Error("prepend requires a valid anchor.");
+				result.push({ op: "prepend_at", pos: anchor, lines });
+			} else if ("range" in loc) {
+				const posAnchor = tryParseTag(loc.range.pos);
+				const endAnchor = tryParseTag(loc.range.end);
+				if (!posAnchor || !endAnchor) throw new Error("range requires valid pos and end anchors.");
+				result.push({ op: "replace_range", pos: posAnchor, end: endAnchor, lines });
+			} else {
+				throw new Error("Unknown loc shape. Expected append, prepend, or range.");
 			}
-			case "append": {
-				result.push({ op: "append", pos: tag ?? end, lines });
-				break;
-			}
-			case "prepend": {
-				result.push({ op: "prepend", pos: end ?? tag, lines });
-				break;
-			}
+		} else {
+			throw new Error(`Invalid loc value: ${JSON.stringify(loc)}`);
 		}
 	}
 	return result;
@@ -544,12 +566,10 @@ export class EditTool implements AgentTool<TInput> {
 				const lines: string[] = [];
 				for (const edit of edits) {
 					// For file creation, only anchorless appends/prepends are valid
-					if ((edit.op === "append" || edit.op === "prepend") && !edit.pos && !edit.end) {
-						if (edit.op === "prepend") {
-							lines.unshift(...hashlineParseText(edit.lines));
-						} else {
-							lines.push(...hashlineParseText(edit.lines));
-						}
+					if (edit.loc === "append") {
+						lines.push(...hashlineParseText(edit.content));
+					} else if (edit.loc === "prepend") {
+						lines.unshift(...hashlineParseText(edit.content));
 					} else {
 						throw new Error(`File not found: ${path}`);
 					}
@@ -574,7 +594,7 @@ export class EditTool implements AgentTool<TInput> {
 			const originalNormalized = normalizeToLF(text);
 			let normalizedText = originalNormalized;
 
-			// Apply anchor-based edits first (replace, append, prepend)
+			// Apply anchor-based edits first (replace, append_at, prepend_at)
 			const anchorResult = applyHashlineEdits(normalizedText, anchorEdits);
 			normalizedText = anchorResult.lines;
 
@@ -604,20 +624,18 @@ export class EditTool implements AgentTool<TInput> {
 					for (const edit of anchorEdits) {
 						refs.length = 0;
 						switch (edit.op) {
-							case "replace":
-								if (edit.end) {
-									refs.push(edit.end, edit.pos);
-								} else {
-									refs.push(edit.pos);
-								}
+							case "replace_line":
+								refs.push(edit.pos);
 								break;
-							case "append":
-								if (edit.pos) refs.push(edit.pos);
+							case "replace_range":
+								refs.push(edit.end, edit.pos);
 								break;
-							case "prepend":
-								if (edit.pos) refs.push(edit.pos);
+							case "append_at":
+							case "prepend_at":
+								refs.push(edit.pos);
 								break;
-							default:
+							case "append_file":
+							case "prepend_file":
 								break;
 						}
 

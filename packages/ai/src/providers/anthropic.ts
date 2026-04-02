@@ -29,10 +29,13 @@ import type {
 	Tool,
 	ToolCall,
 	ToolResultMessage,
+	Usage,
 } from "../types";
 import { isAnthropicOAuthToken, normalizeToolCallId, resolveCacheRetention } from "../utils";
+import { createAbortSourceTracker } from "../utils/abort";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { finalizeErrorMessage, type RawHttpRequestDump } from "../utils/http-inspector";
+import { createFirstEventWatchdog, getStreamFirstEventTimeoutMs, markFirstStreamEvent } from "../utils/idle-iterator";
 import { parseStreamingJson } from "../utils/json-parse";
 import {
 	buildCopilotDynamicHeaders,
@@ -49,6 +52,15 @@ export type AnthropicHeaderOptions = {
 	stream?: boolean;
 	modelHeaders?: Record<string, string>;
 };
+
+export function normalizeAnthropicBaseUrl(baseUrl?: string): string | undefined {
+	const trimmed = baseUrl?.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+	const withoutTrailingSlashes = trimmed.replace(/\/+$/, "");
+	return withoutTrailingSlashes.endsWith("/v1") ? withoutTrailingSlashes.slice(0, -3) : withoutTrailingSlashes;
+}
 
 // Build deduplicated beta header string
 export function buildBetaHeader(baseBetas: string[], extraBetas: string[]): string {
@@ -376,6 +388,12 @@ export interface AnthropicOptions extends StreamOptions {
 	betas?: string[] | string;
 	/** Force OAuth bearer auth mode for proxy tokens that don't match Anthropic token prefixes. */
 	isOAuth?: boolean;
+	/**
+	 * Pre-built Anthropic client instance. When provided, skips internal client
+	 * construction entirely. Use this to inject alternative SDK clients such as
+	 * `AnthropicVertex` that shares the same messaging API.
+	 */
+	client?: Anthropic;
 }
 
 export type AnthropicClientOptionsArgs = {
@@ -415,25 +433,20 @@ function isFoundryEnabled(): boolean {
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
-function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
-	const trimmed = baseUrl?.trim();
-	return trimmed ? trimmed.replace(/\/+$/, "") : undefined;
-}
-
 function resolveAnthropicBaseUrl(model: Model<"anthropic-messages">, apiKey?: string): string | undefined {
 	if (model.provider === "github-copilot") {
-		return normalizeBaseUrl(resolveGitHubCopilotBaseUrl(model.baseUrl, apiKey) ?? model.baseUrl);
+		return normalizeAnthropicBaseUrl(resolveGitHubCopilotBaseUrl(model.baseUrl, apiKey) ?? model.baseUrl);
 	}
 	if (model.provider === "anthropic" && isFoundryEnabled()) {
-		const foundryBaseUrl = normalizeBaseUrl($env.FOUNDRY_BASE_URL);
+		const foundryBaseUrl = normalizeAnthropicBaseUrl($env.FOUNDRY_BASE_URL);
 		if (foundryBaseUrl) {
 			return foundryBaseUrl;
 		}
 	}
 	if (model.provider === "anthropic") {
-		return normalizeBaseUrl(model.baseUrl) ?? "https://api.anthropic.com";
+		return normalizeAnthropicBaseUrl(model.baseUrl) ?? "https://api.anthropic.com";
 	}
-	return normalizeBaseUrl(model.baseUrl);
+	return normalizeAnthropicBaseUrl(model.baseUrl);
 }
 
 function parseAnthropicCustomHeaders(rawHeaders: string | undefined): Record<string, string> | undefined {
@@ -562,12 +575,24 @@ function isTransientStreamParseError(error: unknown): boolean {
 
 export function isProviderRetryableError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
-	const msg = error.message;
+	const msg = error.message.toLowerCase();
 	return (
-		/rate.?limit|too many requests|overloaded|service.?unavailable|internal_error|stream error.*received from peer|1302/i.test(
+		/rate.?limit|too many requests|overloaded|service.?unavailable|internal_error|stream error.*received from peer|1302|timed?\s*out while waiting for the first event|timeout waiting for first/i.test(
 			msg,
 		) || isTransientStreamParseError(error)
 	);
+}
+
+function createEmptyUsage(premiumRequests?: number): Usage {
+	return {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		...(premiumRequests === undefined ? {} : { premiumRequests }),
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
 }
 
 export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
@@ -597,33 +622,39 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 			api: model.api as Api,
 			provider: model.provider,
 			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
+			usage: createEmptyUsage(copilotDynamicHeaders?.premiumRequests),
 			stopReason: "stop",
 			timestamp: Date.now(),
 		};
 		let rawRequestDump: RawHttpRequestDump | undefined;
+		let activeAbortTracker = createAbortSourceTracker(options?.signal);
 
 		try {
-			const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
-			const baseUrl = resolveAnthropicBaseUrl(model, apiKey) ?? "https://api.anthropic.com";
+			let client: Anthropic;
+			let isOAuthToken: boolean;
 
-			const { client, isOAuthToken } = createClient(model, {
-				model,
-				apiKey,
-				extraBetas: normalizeExtraBetas(options?.betas),
-				stream: true,
-				interleavedThinking: options?.interleavedThinking ?? true,
-				headers: options?.headers,
-				dynamicHeaders: copilotDynamicHeaders?.headers,
-				isOAuth: options?.isOAuth,
-			});
+			if (options?.client) {
+				client = options.client;
+				isOAuthToken = false;
+			} else {
+				const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
+
+				const created = createClient(model, {
+					model,
+					apiKey,
+					extraBetas: normalizeExtraBetas(options?.betas),
+					stream: true,
+					interleavedThinking: options?.interleavedThinking ?? true,
+					headers: options?.headers,
+					dynamicHeaders: copilotDynamicHeaders?.headers,
+					isOAuth: options?.isOAuth,
+				});
+				client = created.client;
+				isOAuthToken = created.isOAuthToken;
+			}
+			const baseUrl =
+				resolveAnthropicBaseUrl(model, options?.apiKey ?? getEnvApiKey(model.provider) ?? "") ??
+				"https://api.anthropic.com";
 			let params = buildParams(model, baseUrl, context, isOAuthToken, options);
 			const replacementPayload = await options?.onPayload?.(params, model);
 			if (replacementPayload !== undefined) {
@@ -652,15 +683,23 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 			let providerRetryAttempt = 0;
 			let started = false;
 			do {
-				const anthropicStream = client.messages.stream({ ...params, stream: true }, { signal: options?.signal });
-				if (copilotDynamicHeaders && output.usage.premiumRequests === undefined) {
-					output.usage.premiumRequests = copilotDynamicHeaders.premiumRequests;
-				}
+				activeAbortTracker = createAbortSourceTracker(options?.signal);
+				const firstEventTimeoutAbortError = new Error(
+					"Anthropic stream timed out while waiting for the first event",
+				);
+				const { requestSignal } = activeAbortTracker;
+				const anthropicStream = client.messages.stream({ ...params, stream: true }, { signal: requestSignal });
 
 				try {
-					for await (const event of anthropicStream) {
+					await anthropicStream.withResponse();
+					const firstEventWatchdog = createFirstEventWatchdog(getStreamFirstEventTimeoutMs(), () =>
+						activeAbortTracker.abortLocally(firstEventTimeoutAbortError),
+					);
+
+					for await (const event of markFirstStreamEvent(anthropicStream, firstEventWatchdog)) {
 						started = true;
 						if (event.type === "message_start") {
+							output.responseId = event.message.id;
 							// Capture initial token usage from message_start event
 							// This ensures we have input token counts even if the stream is aborted early
 							output.usage.input = event.message.usage.input_tokens || 0;
@@ -680,7 +719,11 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 									index: event.index,
 								};
 								output.content.push(block);
-								stream.push({ type: "text_start", contentIndex: output.content.length - 1, partial: output });
+								stream.push({
+									type: "text_start",
+									contentIndex: output.content.length - 1,
+									partial: output,
+								});
 							} else if (event.content_block.type === "thinking") {
 								const block: Block = {
 									type: "thinking",
@@ -820,7 +863,11 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 						}
 					}
 
-					if (options?.signal?.aborted) {
+					const firstEventTimeoutError = activeAbortTracker.getLocalAbortReason();
+					if (firstEventTimeoutError) {
+						throw firstEventTimeoutError;
+					}
+					if (activeAbortTracker.wasCallerAbort()) {
 						throw new Error("Request was aborted");
 					}
 
@@ -829,23 +876,28 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 					}
 					break; // Stream completed successfully
 				} catch (streamError) {
+					const streamFailure = activeAbortTracker.getLocalAbortReason() ?? streamError;
 					// Transient stream parse errors (truncated JSON) are retryable even after content
 					// has started streaming, since the partial response is unusable anyway.
 					// Rate-limit/overload errors are only retried before content starts.
-					const isTransient = isTransientStreamParseError(streamError);
+					const isTransient = isTransientStreamParseError(streamFailure);
 					if (
-						options?.signal?.aborted ||
+						activeAbortTracker.wasCallerAbort() ||
 						providerRetryAttempt >= PROVIDER_MAX_RETRIES ||
 						(!isTransient && firstTokenTime !== undefined) ||
-						(!isTransient && !isProviderRetryableError(streamError))
+						(!isTransient && !isProviderRetryableError(streamFailure))
 					) {
-						throw streamError;
+						throw streamFailure;
 					}
 					providerRetryAttempt++;
 					const delayMs = PROVIDER_BASE_DELAY_MS * 2 ** (providerRetryAttempt - 1);
 					await abortableSleep(delayMs, options?.signal);
 					// Reset output state for clean retry
 					output.content.length = 0;
+					output.responseId = undefined;
+					output.errorMessage = undefined;
+					output.providerPayload = undefined;
+					output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
 					output.stopReason = "stop";
 					firstTokenTime = undefined;
 					started = false;
@@ -857,9 +909,10 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			for (const block of output.content) delete (block as any).index;
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = await finalizeErrorMessage(error, rawRequestDump);
+			for (const block of output.content) delete (block as { index?: number }).index;
+			const firstEventTimeoutError = activeAbortTracker.getLocalAbortReason();
+			output.stopReason = activeAbortTracker.wasCallerAbort() ? "aborted" : "error";
+			output.errorMessage = firstEventTimeoutError?.message ?? (await finalizeErrorMessage(error, rawRequestDump));
 			output.duration = Date.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
@@ -1324,7 +1377,10 @@ function buildParams(
 		if (typeof options.toolChoice === "string") {
 			params.tool_choice = { type: options.toolChoice };
 		} else if (isOAuthToken && options.toolChoice.name) {
-			params.tool_choice = { ...options.toolChoice, name: applyClaudeToolPrefix(options.toolChoice.name) };
+			params.tool_choice = {
+				...options.toolChoice,
+				name: applyClaudeToolPrefix(options.toolChoice.name),
+			};
 		} else {
 			params.tool_choice = options.toolChoice;
 		}

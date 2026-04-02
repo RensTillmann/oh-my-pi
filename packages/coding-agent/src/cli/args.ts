@@ -7,7 +7,7 @@ import chalk from "chalk";
 import { parseEffort } from "../thinking";
 import { BUILTIN_TOOLS } from "../tools";
 
-export type Mode = "text" | "json" | "rpc";
+export type Mode = "text" | "json" | "rpc" | "acp";
 
 export interface Args {
 	cwd?: string;
@@ -28,6 +28,8 @@ export interface Args {
 	mode?: Mode;
 	noSession?: boolean;
 	sessionDir?: string;
+	providerSessionId?: string;
+	fork?: string;
 	models?: string[];
 	tools?: string[];
 	noTools?: boolean;
@@ -36,6 +38,7 @@ export interface Args {
 	hooks?: string[];
 	extensions?: string[];
 	noExtensions?: boolean;
+	pluginDirs?: string[];
 	print?: boolean;
 	export?: string;
 	noSkills?: boolean;
@@ -67,7 +70,7 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 			result.allowHome = true;
 		} else if (arg === "--mode" && i + 1 < args.length) {
 			const mode = args[++i];
-			if (mode === "text" || mode === "json" || mode === "rpc") {
+			if (mode === "text" || mode === "json" || mode === "rpc" || mode === "acp") {
 				result.mode = mode;
 			}
 		} else if (arg === "--continue" || arg === "-c") {
@@ -79,6 +82,8 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 			} else {
 				result.resume = true;
 			}
+		} else if (arg === "--fork" && i + 1 < args.length) {
+			result.fork = args[++i];
 		} else if (arg === "--provider" && i + 1 < args.length) {
 			result.provider = args[++i];
 		} else if (arg === "--model" && i + 1 < args.length) {
@@ -95,6 +100,8 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 			result.systemPrompt = args[++i];
 		} else if (arg === "--append-system-prompt" && i + 1 < args.length) {
 			result.appendSystemPrompt = args[++i];
+		} else if (arg === "--provider-session-id" && i + 1 < args.length) {
+			result.providerSessionId = args[++i];
 		} else if (arg === "--no-session") {
 			result.noSession = true;
 		} else if (arg === "--session-dir" && i + 1 < args.length) {
@@ -145,6 +152,9 @@ export function parseArgs(args: string[], extensionFlags?: Map<string, { type: "
 		} else if ((arg === "--extension" || arg === "-e") && i + 1 < args.length) {
 			result.extensions = result.extensions ?? [];
 			result.extensions.push(args[++i]);
+		} else if (arg === "--plugin-dir" && i + 1 < args.length) {
+			result.pluginDirs = result.pluginDirs ?? [];
+			result.pluginDirs.push(args[++i]);
 		} else if (arg === "--no-extensions") {
 			result.noExtensions = true;
 		} else if (arg === "--no-skills") {
@@ -255,6 +265,9 @@ ${chalk.bold("Available Tools (default-enabled unless noted):")}
   fetch         - Fetch and process URLs
   web_search    - Search the web
   ask           - Ask user questions (interactive mode only)
+
+${chalk.bold("Plugin Options:")}
+  --plugin-dir <path>        Load plugin from directory (repeatable)
 
 ${chalk.bold("Useful Commands:")}
   omp agents unpack           - Export bundled subagents to ~/.omp/agent/agents (default)

@@ -3,7 +3,7 @@
  */
 import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
 import type { Component } from "@oh-my-pi/pi-tui";
-import { Text } from "@oh-my-pi/pi-tui";
+import { Text, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { FileDiagnosticsResult } from "../lsp";
 import { renderDiff as renderDiffColored } from "../modes/components/diff";
@@ -21,7 +21,7 @@ import {
 	shortenPath,
 	truncateDiffByHunk,
 } from "../tools/render-utils";
-import { Ellipsis, Hasher, type RenderCache, renderStatusLine, truncateToWidth } from "../tui";
+import { Hasher, type RenderCache, renderStatusLine, truncateToWidth } from "../tui";
 import type { HashlineToolEdit } from "./index";
 import type { DiffError, DiffResult, Operation } from "./types";
 
@@ -157,20 +157,27 @@ function formatStreamingHashlineEdits(edits: Partial<HashlineToolEdit>[], uiThem
 			return { srcLabel: "• (incomplete edit)", dst: "" };
 		}
 
-		const contentLines = Array.isArray(edit.lines) ? (edit.lines as string[]).join("\n") : "";
+		const contentLines = Array.isArray(edit.content) ? (edit.content as string[]).join("\n") : "";
+		const loc = edit.loc;
 
-		const op = typeof edit.op === "string" ? edit.op : "?";
-		const pos = typeof edit.pos === "string" ? edit.pos : undefined;
-		const end = typeof edit.end === "string" ? edit.end : undefined;
-
-		if (pos && end && pos !== end) {
-			return { srcLabel: `• ${op} ${pos}…${end}`, dst: contentLines };
+		if (loc === "append" || loc === "prepend") {
+			return { srcLabel: `• ${loc} (file-level)`, dst: contentLines };
 		}
-		const anchor = pos ?? end;
-		if (anchor) {
-			return { srcLabel: `\u2022 ${op} ${anchor}`, dst: contentLines };
+		if (typeof loc === "object" && loc) {
+			if ("range" in loc && typeof loc.range === "object" && loc.range) {
+				return { srcLabel: `• range ${loc.range.pos ?? "?"}…${loc.range.end ?? "?"}`, dst: contentLines };
+			}
+			if ("line" in loc) {
+				return { srcLabel: `• line ${(loc as { line: string }).line}`, dst: contentLines };
+			}
+			if ("append" in loc) {
+				return { srcLabel: `• append ${(loc as { append: string }).append}`, dst: contentLines };
+			}
+			if ("prepend" in loc) {
+				return { srcLabel: `• prepend ${(loc as { prepend: string }).prepend}`, dst: contentLines };
+			}
 		}
-		return { srcLabel: `\u2022 ${op} (file-level)`, dst: contentLines };
+		return { srcLabel: "• (unknown edit)", dst: contentLines };
 	}
 }
 function formatMetadataLine(lineCount: number | null, language: string | undefined, uiTheme: Theme): string {
@@ -213,6 +220,31 @@ function renderDiffSection(
 		text += uiTheme.fg("toolOutput", `\n… (${remainder.join(", ")}) ${formatExpandHint(uiTheme)}`);
 	}
 	return text;
+}
+
+function wrapEditRendererLine(line: string, width: number): string[] {
+	if (width <= 0) return [line];
+	if (line.length === 0) return [""];
+
+	const startAnsi = line.match(/^((?:\x1b\[[0-9;]*m)*)/)?.[1] ?? "";
+	const bodyWithReset = line.slice(startAnsi.length);
+	const body = bodyWithReset.endsWith("\x1b[39m") ? bodyWithReset.slice(0, -"\x1b[39m".length) : bodyWithReset;
+	const diffMatch = /^([+\-\s])(\s*\d+)\|(.*)$/s.exec(body);
+
+	if (!diffMatch) {
+		return wrapTextWithAnsi(line, width);
+	}
+
+	const [, marker, lineNum, content] = diffMatch;
+	const prefix = `${marker}${lineNum}|`;
+	const prefixWidth = visibleWidth(prefix);
+	const contentWidth = Math.max(1, width - prefixWidth);
+	const continuationPrefix = `${" ".repeat(Math.max(0, prefixWidth - 1))}|`;
+	const wrappedContent = wrapTextWithAnsi(content, contentWidth);
+
+	return wrappedContent.map(
+		(segment, index) => `${startAnsi}${index === 0 ? prefix : continuationPrefix}${segment}\x1b[39m`,
+	);
 }
 
 export const editToolRenderer = {
@@ -350,7 +382,7 @@ export const editToolRenderer = {
 				}
 
 				const lines =
-					width > 0 ? text.split("\n").map(line => truncateToWidth(line, width, Ellipsis.Omit)) : text.split("\n");
+					width > 0 ? text.split("\n").flatMap(line => wrapEditRendererLine(line, width)) : text.split("\n");
 				cached = { key, lines };
 				return lines;
 			},

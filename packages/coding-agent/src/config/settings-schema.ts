@@ -135,10 +135,58 @@ type SettingDef =
 // Schema Definition
 // ═══════════════════════════════════════════════════════════════════════════
 
+export interface ModelTagDef {
+	name: string;
+	color?: string;
+}
+
+export interface ModelTagsSettings {
+	[key: string]: ModelTagDef;
+}
+
 // Typed defaults for array/record settings — named constants avoid `as` casts
 // under `as const` while still letting SettingValue infer the correct element type.
 const EMPTY_STRING_ARRAY: string[] = [];
 const EMPTY_STRING_RECORD: Record<string, string> = {};
+const DEFAULT_CYCLE_ORDER: string[] = ["smol", "default", "slow"];
+const EMPTY_MODEL_TAGS_RECORD: ModelTagsSettings = {};
+export const DEFAULT_BASH_INTERCEPTOR_RULES: BashInterceptorRule[] = [
+	{
+		pattern: "^\\s*(cat|head|tail|less|more)\\s+",
+		tool: "read",
+		message: "Use the `read` tool instead of cat/head/tail. It provides better context and handles binary files.",
+	},
+	{
+		pattern: "^\\s*(grep|rg|ripgrep|ag|ack)\\s+",
+		tool: "grep",
+		message: "Use the `grep` tool instead of grep/rg. It respects .gitignore and provides structured output.",
+	},
+	{
+		pattern: "^\\s*(find|fd|locate)\\s+.*(-name|-iname|-type|--type|-glob)",
+		tool: "find",
+		message: "Use the `find` tool instead of find/fd. It respects .gitignore and is faster for glob patterns.",
+	},
+	{
+		pattern: "^\\s*sed\\s+(-i|--in-place)",
+		tool: "edit",
+		message: "Use the `edit` tool instead of sed -i. It provides diff preview and fuzzy matching.",
+	},
+	{
+		pattern: "^\\s*perl\\s+.*-[pn]?i",
+		tool: "edit",
+		message: "Use the `edit` tool instead of perl -i. It provides diff preview and fuzzy matching.",
+	},
+	{
+		pattern: "^\\s*awk\\s+.*-i\\s+inplace",
+		tool: "edit",
+		message: "Use the `edit` tool instead of awk -i inplace. It provides diff preview and fuzzy matching.",
+	},
+	{
+		pattern: "^\\s*(echo|printf|cat\\s*<<)\\s+.*[^|]>\\s*\\S",
+		tool: "write",
+		message: "Use the `write` tool instead of echo/cat redirection. It handles encoding and provides confirmation.",
+	},
+];
 
 export const SETTINGS_SCHEMA = {
 	// ────────────────────────────────────────────────────────────────────────
@@ -149,6 +197,18 @@ export const SETTINGS_SCHEMA = {
 	shellPath: { type: "string", default: undefined },
 
 	extensions: { type: "array", default: EMPTY_STRING_ARRAY },
+
+	"marketplace.autoUpdate": {
+		type: "enum",
+		values: ["off", "notify", "auto"] as const,
+		default: "notify",
+		ui: {
+			tab: "tools",
+			label: "Marketplace Auto-Update",
+			description: "Check for plugin updates on startup (off/notify/auto)",
+			submenu: true,
+		},
+	},
 
 	enabledModels: { type: "array", default: EMPTY_STRING_ARRAY },
 
@@ -161,6 +221,10 @@ export const SETTINGS_SCHEMA = {
 	restrictedExtensions: { type: "record", default: EMPTY_STRING_RECORD },
 
 	modelRoles: { type: "record", default: EMPTY_STRING_RECORD },
+
+	modelTags: { type: "record", default: EMPTY_MODEL_TAGS_RECORD },
+
+	cycleOrder: { type: "array", default: DEFAULT_CYCLE_ORDER },
 
 	// ────────────────────────────────────────────────────────────────────────
 	// Appearance
@@ -305,6 +369,19 @@ export const SETTINGS_SCHEMA = {
 		ui: { tab: "appearance", label: "Block Images", description: "Prevent images from being sent to LLM providers" },
 	},
 
+	"tui.maxInlineImageColumns": {
+		type: "number",
+		default: 100,
+		description:
+			"Maximum width in terminal columns for inline images (default 100). Set to 0 for unlimited (bounded only by terminal width).",
+	},
+
+	"tui.maxInlineImageRows": {
+		type: "number",
+		default: 20,
+		description:
+			"Maximum height in terminal rows for inline images (default 20). Set to 0 to use only the viewport-based limit (60% of terminal height).",
+	},
 	// Display rendering
 	"display.tabWidth": {
 		type: "number",
@@ -470,6 +547,18 @@ export const SETTINGS_SCHEMA = {
 	},
 
 	"retry.baseDelayMs": { type: "number", default: 2000 },
+	"retry.fallbackChains": { type: "record", default: {} as Record<string, string[]> },
+	"retry.fallbackRevertPolicy": {
+		type: "enum",
+		values: ["cooldown-expiry", "never"] as const,
+		default: "cooldown-expiry",
+		ui: {
+			tab: "model",
+			label: "Fallback Revert Policy",
+			description: "When to return to the primary model after a fallback",
+			submenu: true,
+		},
+	},
 
 	// ────────────────────────────────────────────────────────────────────────
 	// Interaction
@@ -959,16 +1048,7 @@ export const SETTINGS_SCHEMA = {
 		default: false,
 		ui: { tab: "editing", label: "Bash Interceptor", description: "Block shell commands that have dedicated tools" },
 	},
-
-	"bashInterceptor.simpleLs": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "editing",
-			label: "Intercept `ls`",
-			description: "Intercept bare ls commands (when interceptor is enabled)",
-		},
-	},
+	"bashInterceptor.patterns": { type: "array", default: DEFAULT_BASH_INTERCEPTOR_RULES },
 
 	// Python
 	"python.toolMode": {
@@ -1144,6 +1224,16 @@ export const SETTINGS_SCHEMA = {
 		type: "boolean",
 		default: true,
 		ui: { tab: "tools", label: "Fetch", description: "Enable the fetch tool for URL fetching" },
+	},
+
+	"github.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			label: "GitHub CLI",
+			description: "Enable read-only gh_* tools for GitHub repository, issue, pull request, diff, and search access",
+		},
 	},
 
 	"web_search.enabled": {
@@ -1455,19 +1545,6 @@ export const SETTINGS_SCHEMA = {
 			submenu: true,
 		},
 	},
-
-	"providers.codeSearch": {
-		type: "enum",
-		values: ["grep", "exa"] as const,
-		default: "grep",
-		ui: {
-			tab: "providers",
-			label: "Code Search Provider",
-			description: "Provider for code search tool",
-			submenu: true,
-		},
-	},
-
 	"providers.image": {
 		type: "enum",
 		values: ["auto", "gemini", "openrouter"] as const,
@@ -1558,6 +1635,8 @@ export const SETTINGS_SCHEMA = {
 	"thinkingBudgets.medium": { type: "number", default: 8192 },
 
 	"thinkingBudgets.high": { type: "number", default: 16384 },
+
+	"thinkingBudgets.xhigh": { type: "number", default: 32768 },
 } as const;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1740,6 +1819,7 @@ export interface ThinkingBudgetsSettings {
 	low: number;
 	medium: number;
 	high: number;
+	xhigh: number;
 }
 
 export interface SttSettings {
@@ -1774,6 +1854,8 @@ export interface GroupTypeMap {
 	thinkingBudgets: ThinkingBudgetsSettings;
 	stt: SttSettings;
 	modelRoles: Record<string, string>;
+	modelTags: ModelTagsSettings;
+	cycleOrder: string[];
 }
 
 export type GroupPrefix = keyof GroupTypeMap;

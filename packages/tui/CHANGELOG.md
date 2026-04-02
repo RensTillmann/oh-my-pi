@@ -9,6 +9,42 @@
 
 - Fixed inline editor rendering to expand tabs before display, preventing line wrap artifacts when scrolling.
 
+## [13.16.1] - 2026-03-27
+
+### Added
+
+- Support for optional SearchDb parameter in CombinedAutocompleteProvider constructor for improved fuzzy search performance
+- Fuzzy matching filter for autocomplete suggestions to improve relevance of results
+
+### Changed
+
+- Fuzzy discovery now applies fuzzy matching filter to results for improved relevance of autocomplete suggestions
+- Autocomplete fuzzy discovery now accepts optional SearchDb instance for faster searches
+
+## [13.16.0] - 2026-03-27
+### Changed
+
+- Updated tab replacement in editor text sanitization to respect configured tab width setting
+
+## [13.15.0] - 2026-03-23
+
+### Added
+
+- Added `renderInlineMarkdown()` function to render inline markdown (bold, italic, code, links, strikethrough) to styled strings
+
+### Fixed
+
+- Fixed editor consuming user-rebound copy keys, preventing custom keybindings from working in the editor
+
+## [13.14.1] - 2026-03-21
+### Added
+
+- Added Ctrl+_ as an additional default shortcut for undo
+
+### Fixed
+
+- Ensured undo functionality respects user-configured keybindings
+
 ## [13.12.0] - 2026-03-14
 
 ### Added

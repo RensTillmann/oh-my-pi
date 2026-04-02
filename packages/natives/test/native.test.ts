@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	executeShell,
 	FileType,
 	fuzzyFind,
 	type GlobMatch,
@@ -55,6 +56,23 @@ async function cleanupFixtures() {
 	await fs.rm(testDir, { recursive: true, force: true });
 }
 
+function canCreateFifo() {
+	return process.platform !== "win32" && Boolean(Bun.which("mkfifo"));
+}
+
+async function createFifo(fifoPath: string) {
+	const process = Bun.spawn(["mkfifo", fifoPath], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const exitCode = await process.exited;
+	if (exitCode === 0) {
+		return;
+	}
+
+	throw new Error(await new Response(process.stderr).text());
+}
+
 describe("pi-natives", () => {
 	beforeAll(async () => {
 		await setupFixtures();
@@ -73,6 +91,17 @@ describe("pi-natives", () => {
 			expect(result.totalMatches).toBe(1);
 			expect(result.matches.length).toBe(1);
 			expect(result.matches[0].line).toContain("TODO");
+		});
+
+		it("should handle literal function-call text with parentheses", async () => {
+			const result = await grep({
+				pattern: "hello(",
+				path: testDir,
+			});
+
+			expect(result.totalMatches).toBe(1);
+			expect(result.matches).toHaveLength(1);
+			expect(result.matches[0].line).toContain("hello()");
 		});
 
 		it("should respect glob patterns", async () => {
@@ -160,6 +189,77 @@ describe("pi-natives", () => {
 
 			expect(hiddenIncluded.totalMatches).toBe(1);
 			expect(hiddenIncluded.matches.some(match => match.path.endsWith(".hidden-ignored.ts"))).toBe(true);
+		});
+
+		it("should skip FIFOs when searching a directory", async () => {
+			if (!canCreateFifo()) {
+				return;
+			}
+
+			const scopedDir = path.join(testDir, "grep-fifo-directory-case");
+			const filePath = path.join(scopedDir, "match.txt");
+			const fifoPath = path.join(scopedDir, "ignored.fifo");
+			await fs.mkdir(scopedDir, { recursive: true });
+
+			try {
+				await fs.writeFile(filePath, "FIFO_TOKEN in regular file\n");
+				await createFifo(fifoPath);
+
+				const outcome = await Promise.race([
+					grep({
+						pattern: "FIFO_TOKEN",
+						path: scopedDir,
+						gitignore: false,
+					}).then(result => ({ kind: "done" as const, result })),
+					Bun.sleep(2000).then(() => ({ kind: "timeout" as const })),
+				]);
+
+				expect(outcome.kind).toBe("done");
+				if (outcome.kind !== "done") {
+					return;
+				}
+
+				expect(outcome.result.totalMatches).toBe(1);
+				expect(outcome.result.matches).toHaveLength(1);
+				expect(outcome.result.matches[0].path.endsWith("match.txt")).toBe(true);
+				expect(outcome.result.matches.some(match => match.path.endsWith("ignored.fifo"))).toBe(false);
+			} finally {
+				await fs.rm(scopedDir, { recursive: true, force: true });
+			}
+		});
+
+		it("should return no matches for a FIFO path", async () => {
+			if (!canCreateFifo()) {
+				return;
+			}
+
+			const scopedDir = path.join(testDir, "grep-fifo-direct-path-case");
+			const fifoPath = path.join(scopedDir, "direct.fifo");
+			await fs.mkdir(scopedDir, { recursive: true });
+
+			try {
+				await createFifo(fifoPath);
+
+				const outcome = await Promise.race([
+					grep({
+						pattern: "FIFO_TOKEN",
+						path: fifoPath,
+						gitignore: false,
+					}).then(result => ({ kind: "done" as const, result })),
+					Bun.sleep(2000).then(() => ({ kind: "timeout" as const })),
+				]);
+
+				expect(outcome.kind).toBe("done");
+				if (outcome.kind !== "done") {
+					return;
+				}
+
+				expect(outcome.result.totalMatches).toBe(0);
+				expect(outcome.result.filesWithMatches).toBe(0);
+				expect(outcome.result.matches).toHaveLength(0);
+			} finally {
+				await fs.rm(scopedDir, { recursive: true, force: true });
+			}
 		});
 	});
 	describe("fuzzyFind", () => {
@@ -284,6 +384,29 @@ describe("pi-natives", () => {
 					session.kill();
 				} catch {}
 			}
+		});
+	});
+
+	describe("shell", () => {
+		it("should time out background workloads without leaving delayed writers behind", async () => {
+			if (process.platform === "win32") {
+				return;
+			}
+
+			const markerPath = path.join(testDir, "shell-timeout-marker.txt");
+			const markerEscaped = markerPath.replace(/'/g, "'\\''");
+			await fs.rm(markerPath, { force: true });
+
+			const result = await executeShell({
+				command: `{ sleep 2; echo done > '${markerEscaped}'; } & sleep 10`,
+				cwd: testDir,
+				timeoutMs: 100,
+			});
+
+			expect(result.timedOut).toBe(true);
+
+			await Bun.sleep(3000);
+			expect(await Bun.file(markerPath).exists()).toBe(false);
 		});
 	});
 	describe("htmlToMarkdown", () => {

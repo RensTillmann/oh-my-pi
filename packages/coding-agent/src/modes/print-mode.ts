@@ -76,6 +76,7 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 			// ExtensionContextActions
 			{
 				getModel: () => session.model,
+				getSearchDb: () => session.searchDb,
 				isIdle: () => !session.isStreaming,
 				abort: () => session.abort(),
 				hasPendingMessages: () => session.queuedMessageCount > 0,
@@ -146,7 +147,7 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	});
 
 	// Send initial message with attachments
-	if (initialMessage) {
+	if (initialMessage !== undefined) {
 		await session.prompt(initialMessage, { images: initialImages });
 	}
 

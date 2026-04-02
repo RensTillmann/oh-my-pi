@@ -960,6 +960,76 @@ export type ThemeColor =
 	| "statusLineCost"
 	| "statusLineSubagents";
 
+/** Set of all valid ThemeColor string values for runtime validation */
+const THEME_COLOR_RECORD = {
+	accent: true,
+	border: true,
+	borderAccent: true,
+	borderMuted: true,
+	success: true,
+	error: true,
+	warning: true,
+	muted: true,
+	dim: true,
+	text: true,
+	thinkingText: true,
+	userMessageText: true,
+	customMessageText: true,
+	customMessageLabel: true,
+	toolTitle: true,
+	toolOutput: true,
+	mdHeading: true,
+	mdLink: true,
+	mdLinkUrl: true,
+	mdCode: true,
+	mdCodeBlock: true,
+	mdCodeBlockBorder: true,
+	mdQuote: true,
+	mdQuoteBorder: true,
+	mdHr: true,
+	mdListBullet: true,
+	toolDiffAdded: true,
+	toolDiffRemoved: true,
+	toolDiffContext: true,
+	syntaxComment: true,
+	syntaxKeyword: true,
+	syntaxFunction: true,
+	syntaxVariable: true,
+	syntaxString: true,
+	syntaxNumber: true,
+	syntaxType: true,
+	syntaxOperator: true,
+	syntaxPunctuation: true,
+	thinkingOff: true,
+	thinkingMinimal: true,
+	thinkingLow: true,
+	thinkingMedium: true,
+	thinkingHigh: true,
+	thinkingXhigh: true,
+	bashMode: true,
+	pythonMode: true,
+	statusLineSep: true,
+	statusLineModel: true,
+	statusLinePath: true,
+	statusLineGitClean: true,
+	statusLineGitDirty: true,
+	statusLineContext: true,
+	statusLineSpend: true,
+	statusLineStaged: true,
+	statusLineDirty: true,
+	statusLineUntracked: true,
+	statusLineOutput: true,
+	statusLineCost: true,
+	statusLineSubagents: true,
+} satisfies Record<ThemeColor, true>;
+
+const VALID_THEME_COLORS: ReadonlySet<string> = new Set(Object.keys(THEME_COLOR_RECORD));
+
+/** Check if a string is a valid ThemeColor value */
+export function isValidThemeColor(color: string): color is ThemeColor {
+	return VALID_THEME_COLORS.has(color);
+}
+
 export type ThemeBg =
 	| "selectedBg"
 	| "userMessageBg"
@@ -1685,6 +1755,7 @@ export function getCurrentThemeName(): string | undefined {
 var currentSymbolPresetOverride: SymbolPreset | undefined;
 var currentColorBlindMode: boolean = false;
 var themeWatcher: fs.FSWatcher | undefined;
+var themeReloadTimer: NodeJS.Timeout | undefined;
 var sigwinchHandler: (() => void) | undefined;
 var autoDetectedTheme: boolean = false;
 var autoDarkTheme: string = "dark";
@@ -1894,11 +1965,7 @@ export function isValidSymbolPreset(preset: string): preset is SymbolPreset {
 }
 
 async function startThemeWatcher(): Promise<void> {
-	// Stop existing watcher if any
-	if (themeWatcher) {
-		themeWatcher.close();
-		themeWatcher = undefined;
-	}
+	stopThemeWatcher();
 
 	// Only watch if it's a custom theme (not built-in)
 	if (!currentThemeName || currentThemeName === "dark" || currentThemeName === "light") {
@@ -1906,54 +1973,62 @@ async function startThemeWatcher(): Promise<void> {
 	}
 
 	const customThemesDir = getCustomThemesDir();
-	const themeFile = path.join(customThemesDir, `${currentThemeName}.json`);
+	const watchedThemeName = currentThemeName;
+	const watchedFileName = `${watchedThemeName}.json`;
+	const themeFile = path.join(customThemesDir, watchedFileName);
 
 	// Only watch if the file exists
 	if (!fs.existsSync(themeFile)) {
 		return;
 	}
 
-	try {
-		themeWatcher = fs.watch(themeFile, eventType => {
-			if (eventType === "change") {
-				// Debounce rapid changes
-				setTimeout(() => {
-					loadTheme(currentThemeName!, getCurrentThemeOptions())
-						.then(loadedTheme => {
-							theme = loadedTheme;
-							if (onThemeChangeCallback) {
-								onThemeChangeCallback();
-							}
-						})
-						.catch(err => {
-							logger.debug("Theme reload error during file change", { error: String(err) });
-						});
-				}, 100);
-			} else if (eventType === "rename") {
-				// File was deleted or renamed - fall back to default theme
-				setTimeout(() => {
-					if (!fs.existsSync(themeFile)) {
-						currentThemeName = "dark";
-						loadTheme("dark", getCurrentThemeOptions())
-							.then(loadedTheme => {
-								theme = loadedTheme;
-								if (onThemeChangeCallback) {
-									onThemeChangeCallback();
-								}
-							})
-							.catch(err => {
-								logger.debug("Theme reload error during rename fallback", { error: String(err) });
-							});
-						if (themeWatcher) {
-							themeWatcher.close();
-							themeWatcher = undefined;
-						}
-					}
-				}, 100);
+	const scheduleReload = () => {
+		if (themeReloadTimer) {
+			clearTimeout(themeReloadTimer);
+		}
+		themeReloadTimer = setTimeout(() => {
+			themeReloadTimer = undefined;
+
+			// Ignore stale timers after switching themes or stopping the watcher
+			if (currentThemeName !== watchedThemeName) {
+				return;
 			}
+
+			// Keep the last successfully loaded theme active if the file is temporarily missing
+			if (!fs.existsSync(themeFile)) {
+				return;
+			}
+
+			loadTheme(watchedThemeName, getCurrentThemeOptions())
+				.then(loadedTheme => {
+					theme = loadedTheme;
+					if (onThemeChangeCallback) {
+						onThemeChangeCallback();
+					}
+				})
+				.catch(() => {
+					// Ignore errors (file might be in invalid state while being edited)
+				});
+		}, 100);
+	};
+
+	try {
+		themeWatcher = fs.watch(customThemesDir, (_eventType, filename) => {
+			if (currentThemeName !== watchedThemeName) {
+				return;
+			}
+			if (!filename) {
+				scheduleReload();
+				return;
+			}
+			const changedFile = String(filename);
+			if (changedFile !== watchedFileName) {
+				return;
+			}
+			scheduleReload();
 		});
-	} catch (err) {
-		logger.debug("Failed to start theme watcher", { error: String(err) });
+	} catch {
+		// Ignore errors starting watcher
 	}
 }
 
@@ -2029,6 +2104,10 @@ function stopSigwinchListener(): void {
 }
 
 export function stopThemeWatcher(): void {
+	if (themeReloadTimer) {
+		clearTimeout(themeReloadTimer);
+		themeReloadTimer = undefined;
+	}
 	if (themeWatcher) {
 		themeWatcher.close();
 		themeWatcher = undefined;

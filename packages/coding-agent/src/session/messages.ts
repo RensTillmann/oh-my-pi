@@ -6,6 +6,7 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type {
+	AssistantMessage,
 	ImageContent,
 	Message,
 	MessageAttribution,
@@ -210,6 +211,32 @@ export function createCompactionSummaryMessage(
 		tokensBefore,
 		providerPayload,
 		timestamp: new Date(timestamp).getTime(),
+	};
+}
+
+export function sanitizeRehydratedOpenAIResponsesAssistantMessage(message: AssistantMessage): AssistantMessage {
+	if (message.providerPayload?.type !== "openaiResponsesHistory") {
+		return message;
+	}
+
+	let didSanitizeContent = false;
+	const sanitizedContent = message.content.map(block => {
+		if (block.type !== "thinking" || block.thinkingSignature === undefined) {
+			return block;
+		}
+
+		didSanitizeContent = true;
+		return { ...block, thinkingSignature: undefined };
+	});
+
+	// Strip the assistant-side native replay payload entirely.
+	// After rehydration it belongs to a previous live provider connection and
+	// replaying it on a warmed session causes 401 rejections from GitHub Copilot.
+	// User/developer payloads are preserved separately by the caller.
+	return {
+		...message,
+		...(didSanitizeContent ? { content: sanitizedContent } : {}),
+		providerPayload: undefined,
 	};
 }
 

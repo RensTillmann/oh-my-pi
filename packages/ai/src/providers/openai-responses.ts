@@ -14,6 +14,7 @@ import {
 	isSpecialServiceTier,
 	type MessageAttribution,
 	type Model,
+	type ProviderSessionState,
 	type ServiceTier,
 	type StreamFunction,
 	type StreamOptions,
@@ -27,9 +28,16 @@ import {
 	resolveCacheRetention,
 	sanitizeOpenAIResponsesHistoryItemsForReplay,
 } from "../utils";
+import { createAbortSourceTracker } from "../utils/abort";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { finalizeErrorMessage, type RawHttpRequestDump } from "../utils/http-inspector";
-import { getOpenAIStreamIdleTimeoutMs, iterateWithIdleTimeout } from "../utils/idle-iterator";
+import {
+	createFirstEventWatchdog,
+	getOpenAIStreamIdleTimeoutMs,
+	getStreamFirstEventTimeoutMs,
+	iterateWithIdleTimeout,
+	markFirstStreamEvent,
+} from "../utils/idle-iterator";
 import { adaptSchemaForStrict, NO_STRICT } from "../utils/schema";
 import { mapToOpenAIResponsesToolChoice } from "../utils/tool-choice";
 import {
@@ -74,6 +82,47 @@ export interface OpenAIResponsesOptions extends StreamOptions {
 	strictResponsesPairing?: boolean;
 }
 
+const OPENAI_RESPONSES_PROVIDER_SESSION_STATE_PREFIX = "openai-responses:";
+const OPENAI_RESPONSES_FIRST_EVENT_TIMEOUT_MESSAGE =
+	"OpenAI responses stream timed out while waiting for the first event";
+
+interface OpenAIResponsesProviderSessionState extends ProviderSessionState {
+	nativeHistoryReplayWarmed: boolean;
+}
+
+function createOpenAIResponsesProviderSessionState(): OpenAIResponsesProviderSessionState {
+	const state: OpenAIResponsesProviderSessionState = {
+		nativeHistoryReplayWarmed: false,
+		close: () => {
+			state.nativeHistoryReplayWarmed = false;
+		},
+	};
+	return state;
+}
+
+function getOpenAIResponsesProviderSessionStateKey(model: Model<"openai-responses">): string {
+	return `${OPENAI_RESPONSES_PROVIDER_SESSION_STATE_PREFIX}${model.provider}`;
+}
+
+function getOpenAIResponsesProviderSessionState(
+	model: Model<"openai-responses">,
+	providerSessionState: Map<string, ProviderSessionState> | undefined,
+): OpenAIResponsesProviderSessionState | undefined {
+	if (!providerSessionState) return undefined;
+	const key = getOpenAIResponsesProviderSessionStateKey(model);
+	const existing = providerSessionState.get(key) as OpenAIResponsesProviderSessionState | undefined;
+	if (existing) return existing;
+	const created = createOpenAIResponsesProviderSessionState();
+	providerSessionState.set(key, created);
+	return created;
+}
+
+function canReplayOpenAIResponsesNativeHistory(
+	providerSessionState: OpenAIResponsesProviderSessionState | undefined,
+): boolean {
+	return providerSessionState?.nativeHistoryReplayWarmed ?? true;
+}
+
 type OpenAIResponsesSamplingParams = ResponseCreateParamsStreaming & {
 	top_p?: number;
 	top_k?: number;
@@ -115,6 +164,9 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
 			timestamp: Date.now(),
 		};
 		let rawRequestDump: RawHttpRequestDump | undefined;
+		const abortTracker = createAbortSourceTracker(options?.signal);
+		const firstEventTimeoutAbortError = new Error(OPENAI_RESPONSES_FIRST_EVENT_TIMEOUT_MESSAGE);
+		const { requestAbortController, requestSignal } = abortTracker;
 
 		try {
 			// Create OpenAI client
@@ -126,11 +178,9 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
 				options?.headers,
 				options?.initiatorOverride,
 			);
-			const { params } = buildParams(model, context, options);
-			const requestAbortController = new AbortController();
-			const requestSignal = options?.signal
-				? AbortSignal.any([options.signal, requestAbortController.signal])
-				: requestAbortController.signal;
+			const providerSessionState = getOpenAIResponsesProviderSessionState(model, options?.providerSessionState);
+			const { params } = buildParams(model, context, options, providerSessionState, baseUrl);
+			const idleTimeoutMs = getOpenAIStreamIdleTimeoutMs();
 			options?.onPayload?.(params);
 			rawRequestDump = {
 				provider: model.provider,
@@ -141,13 +191,16 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
 				body: params,
 			};
 			const openaiStream = await client.responses.create(params, { signal: requestSignal });
+			const firstEventWatchdog = createFirstEventWatchdog(getStreamFirstEventTimeoutMs(idleTimeoutMs), () =>
+				abortTracker.abortLocally(firstEventTimeoutAbortError),
+			);
 			if (copilotPremiumRequests !== undefined) output.usage.premiumRequests = copilotPremiumRequests;
 			stream.push({ type: "start", partial: output });
 
 			const nativeOutputItems: Array<Record<string, unknown>> = [];
 			await processResponsesStream(
-				iterateWithIdleTimeout(openaiStream, {
-					idleTimeoutMs: getOpenAIStreamIdleTimeoutMs(),
+				iterateWithIdleTimeout(markFirstStreamEvent(openaiStream, firstEventWatchdog), {
+					idleTimeoutMs,
 					errorMessage: "OpenAI responses stream stalled while waiting for the next event",
 					onIdle: () => requestAbortController.abort(),
 				}),
@@ -165,7 +218,11 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
 			);
 			if (copilotPremiumRequests !== undefined) output.usage.premiumRequests = copilotPremiumRequests;
 
-			if (options?.signal?.aborted) {
+			const firstEventTimeoutError = abortTracker.getLocalAbortReason();
+			if (firstEventTimeoutError) {
+				throw firstEventTimeoutError;
+			}
+			if (abortTracker.wasCallerAbort()) {
 				throw new Error("Request was aborted");
 			}
 
@@ -174,6 +231,7 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
 			}
 
 			output.providerPayload = createOpenAIResponsesHistoryPayload(model.provider, nativeOutputItems);
+			if (providerSessionState) providerSessionState.nativeHistoryReplayWarmed = true;
 
 			output.duration = Date.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;
@@ -181,8 +239,9 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
 			stream.end();
 		} catch (error) {
 			for (const block of output.content) delete (block as { index?: number }).index;
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = await finalizeErrorMessage(error, rawRequestDump);
+			const firstEventTimeoutError = abortTracker.getLocalAbortReason();
+			output.stopReason = abortTracker.wasCallerAbort() ? "aborted" : "error";
+			output.errorMessage = firstEventTimeoutError?.message ?? (await finalizeErrorMessage(error, rawRequestDump));
 			output.duration = Date.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
@@ -246,16 +305,23 @@ function createClient(
 function buildParams(
 	model: Model<"openai-responses">,
 	context: Context,
-	options?: OpenAIResponsesOptions,
+	options: OpenAIResponsesOptions | undefined,
+	providerSessionState: OpenAIResponsesProviderSessionState | undefined,
+	resolvedBaseUrl?: string,
 ): { conversationMessages: ResponseInput; params: OpenAIResponsesSamplingParams } {
 	const strictResponsesPairing =
 		options?.strictResponsesPairing ??
 		(isAzureOpenAIBaseUrl(model.baseUrl ?? "") || model.provider === "github-copilot");
-	const conversationMessages = convertConversationMessages(model, context, strictResponsesPairing);
+	const conversationMessages = convertConversationMessages(
+		model,
+		context,
+		strictResponsesPairing,
+		providerSessionState,
+	);
 	const messages: ResponseInput = [...conversationMessages];
 
 	if (context.systemPrompt) {
-		const role = model.reasoning ? "developer" : "system";
+		const role = model.reasoning && supportsDeveloperRole(resolvedBaseUrl ?? model) ? "developer" : "system";
 		messages.unshift({
 			role,
 			content: context.systemPrompt.toWellFormed(),
@@ -350,13 +416,28 @@ function supportsStrictMode(model: Model<"openai-responses">): boolean {
 	);
 }
 
+export function supportsDeveloperRole(modelOrBaseUrl: Pick<Model, "provider" | "baseUrl"> | string): boolean {
+	const baseUrl =
+		typeof modelOrBaseUrl === "string" ? modelOrBaseUrl.toLowerCase() : (modelOrBaseUrl.baseUrl ?? "").toLowerCase();
+	return (
+		baseUrl.includes("api.openai.com") ||
+		baseUrl.includes(".openai.azure.com") ||
+		baseUrl.includes("azure.com/openai") ||
+		baseUrl.includes("models.inference.ai.azure.com") ||
+		baseUrl.includes("githubcopilot.com") ||
+		baseUrl.includes("copilot-api.")
+	);
+}
+
 function convertConversationMessages(
 	model: Model<"openai-responses">,
 	context: Context,
 	strictResponsesPairing: boolean,
+	providerSessionState: OpenAIResponsesProviderSessionState | undefined,
 ): ResponseInput {
 	const messages: ResponseInput = [];
 	let knownCallIds = new Set<string>();
+	const shouldReplayNativeHistory = canReplayOpenAIResponsesNativeHistory(providerSessionState);
 	const transformedMessages = transformMessages(context.messages, model, normalizeResponsesToolCallIdForTransform);
 
 	let msgIndex = 0;
@@ -364,7 +445,15 @@ function convertConversationMessages(
 		if (msg.role === "user" || msg.role === "developer") {
 			const providerPayload = (msg as { providerPayload?: AssistantMessage["providerPayload"] }).providerPayload;
 			const historyItems = getOpenAIResponsesHistoryItems(providerPayload, model.provider);
-			if (historyItems) {
+			const shouldReplayPayloadItems =
+				shouldReplayNativeHistory ||
+				(historyItems?.some(item => {
+					if (!item || typeof item !== "object") return false;
+					const candidate = item as { type?: unknown };
+					return candidate.type === "compaction" || candidate.type === "compaction_summary";
+				}) ??
+					false);
+			if (historyItems && shouldReplayPayloadItems) {
 				messages.push(...sanitizeOpenAIResponsesHistoryItemsForReplay(historyItems));
 				knownCallIds = collectKnownCallIds(messages);
 				msgIndex++;
@@ -375,11 +464,9 @@ function convertConversationMessages(
 			messages.push({ role: "user", content });
 		} else if (msg.role === "assistant") {
 			const assistantMsg = msg as AssistantMessage;
-			const providerPayload = getOpenAIResponsesHistoryPayload(
-				assistantMsg.providerPayload,
-				model.provider,
-				assistantMsg.provider,
-			);
+			const providerPayload = shouldReplayNativeHistory
+				? getOpenAIResponsesHistoryPayload(assistantMsg.providerPayload, model.provider, assistantMsg.provider)
+				: undefined;
 			const historyItems = providerPayload?.items;
 			if (historyItems) {
 				const sanitizedHistoryItems = sanitizeOpenAIResponsesHistoryItemsForReplay(historyItems);
@@ -393,7 +480,13 @@ function convertConversationMessages(
 				continue;
 			}
 
-			const outputItems = convertResponsesAssistantMessage(assistantMsg, model, msgIndex, knownCallIds);
+			const outputItems = convertResponsesAssistantMessage(
+				assistantMsg,
+				model,
+				msgIndex,
+				knownCallIds,
+				shouldReplayNativeHistory,
+			);
 			if (outputItems.length === 0) continue;
 			messages.push(...outputItems);
 		} else if (msg.role === "toolResult") {

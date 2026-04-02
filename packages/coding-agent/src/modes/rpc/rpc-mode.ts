@@ -11,7 +11,11 @@
  * - Extension UI: Extension UI requests are emitted, client responds with extension_ui_response
  */
 import { readJsonl, Snowflake } from "@oh-my-pi/pi-utils";
-import type { ExtensionUIContext, ExtensionUIDialogOptions } from "../../extensibility/extensions";
+import type {
+	ExtensionUIContext,
+	ExtensionUIDialogOptions,
+	ExtensionWidgetOptions,
+} from "../../extensibility/extensions";
 import { type Theme, theme } from "../../modes/theme/theme";
 import type { AgentSession } from "../../session/agent-session";
 import type {
@@ -24,6 +28,77 @@ import type {
 
 // Re-export types for consumers
 export type * from "./rpc-types";
+
+export type PendingExtensionRequest = {
+	resolve: (response: RpcExtensionUIResponse) => void;
+	reject: (error: Error) => void;
+};
+
+type RpcOutput = (obj: RpcResponse | RpcExtensionUIRequest | object) => void;
+
+export function requestRpcEditor(
+	pendingRequests: Map<string, PendingExtensionRequest>,
+	output: RpcOutput,
+	title: string,
+	prefill?: string,
+	dialogOptions?: ExtensionUIDialogOptions,
+	editorOptions?: { promptStyle?: boolean },
+): Promise<string | undefined> {
+	if (dialogOptions?.signal?.aborted) return Promise.resolve(undefined);
+
+	const id = Snowflake.next() as string;
+	const { promise, resolve, reject } = Promise.withResolvers<string | undefined>();
+	let settled = false;
+
+	const cleanup = () => {
+		dialogOptions?.signal?.removeEventListener("abort", onAbort);
+		pendingRequests.delete(id);
+	};
+	const finish = (value: string | undefined) => {
+		if (settled) return;
+		settled = true;
+		cleanup();
+		resolve(value);
+	};
+	const fail = (error: Error) => {
+		if (settled) return;
+		settled = true;
+		cleanup();
+		reject(error);
+	};
+	const onAbort = () => {
+		output({
+			type: "extension_ui_request",
+			id: Snowflake.next() as string,
+			method: "cancel",
+			targetId: id,
+		} as RpcExtensionUIRequest);
+		finish(undefined);
+	};
+
+	dialogOptions?.signal?.addEventListener("abort", onAbort, { once: true });
+	pendingRequests.set(id, {
+		resolve: response => {
+			if ("cancelled" in response && response.cancelled) {
+				finish(undefined);
+			} else if ("value" in response) {
+				finish(response.value);
+			} else {
+				finish(undefined);
+			}
+		},
+		reject: fail,
+	});
+	output({
+		type: "extension_ui_request",
+		id,
+		method: "editor",
+		title,
+		prefill,
+		promptStyle: editorOptions?.promptStyle,
+	} as RpcExtensionUIRequest);
+	return promise;
+}
 
 /**
  * Run in RPC mode.
@@ -49,12 +124,6 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 
 	const error = (id: string | undefined, command: string, message: string): RpcResponse => {
 		return { id, type: "response", command, success: false, error: message };
-	};
-
-	// Pending extension UI requests waiting for response
-	type PendingExtensionRequest = {
-		resolve: (response: RpcExtensionUIResponse) => void;
-		reject: (error: Error) => void;
 	};
 
 	const pendingExtensionRequests = new Map<string, PendingExtensionRequest>();
@@ -198,7 +267,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			// Not supported in RPC mode
 		}
 
-		setWidget(key: string, content: unknown): void {
+		setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
 			// Only support string arrays in RPC mode - factory functions are ignored
 			if (content === undefined || Array.isArray(content)) {
 				this.output({
@@ -207,6 +276,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 					method: "setWidget",
 					widgetKey: key,
 					widgetLines: content as string[] | undefined,
+					widgetPlacement: options?.placement,
 				} as RpcExtensionUIRequest);
 			}
 			// Component factories are not supported in RPC mode - would need TUI access
@@ -256,30 +326,13 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			return "";
 		}
 
-		async editor(title: string, prefill?: string): Promise<string | undefined> {
-			const id = Snowflake.next() as string;
-			const { promise, resolve, reject } = Promise.withResolvers<string | undefined>();
-			this.pendingRequests.set(id, {
-				resolve: (response: RpcExtensionUIResponse) => {
-					this.pendingRequests.delete(id);
-					if ("cancelled" in response && response.cancelled) {
-						resolve(undefined);
-					} else if ("value" in response) {
-						resolve(response.value);
-					} else {
-						resolve(undefined);
-					}
-				},
-				reject,
-			});
-			this.output({
-				type: "extension_ui_request",
-				id,
-				method: "editor",
-				title,
-				prefill,
-			} as RpcExtensionUIRequest);
-			return promise;
+		async editor(
+			title: string,
+			prefill?: string,
+			dialogOptions?: ExtensionUIDialogOptions,
+			editorOptions?: { promptStyle?: boolean },
+		): Promise<string | undefined> {
+			return requestRpcEditor(this.pendingRequests, this.output, title, prefill, dialogOptions, editorOptions);
 		}
 
 		get theme(): Theme {
@@ -351,6 +404,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			// ExtensionContextActions
 			{
 				getModel: () => session.agent.state.model,
+				getSearchDb: () => session.searchDb,
 				isIdle: () => !session.isStreaming,
 				abort: () => session.abort(),
 				hasPendingMessages: () => session.queuedMessageCount > 0,
