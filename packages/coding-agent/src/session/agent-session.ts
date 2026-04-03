@@ -448,6 +448,7 @@ export class AgentSession {
 
 	// Bash execution state
 	#bashAbortController: AbortController | undefined = undefined;
+	#bashBackgroundDeferred: PromiseWithResolvers<void> | undefined = undefined;
 	#pendingBashMessages: BashExecutionMessage[] = [];
 
 	// Python execution state
@@ -5276,19 +5277,53 @@ export class AgentSession {
 		}
 
 		this.#bashAbortController = new AbortController();
+		const backgroundDeferred = Promise.withResolvers<void>();
+		this.#bashBackgroundDeferred = backgroundDeferred;
 
 		try {
-			const result = await executeBashCommand(command, {
+			const timeoutMs = clampTimeout("bash") * 1000;
+			const outcome = await executeBashCommand(command, {
 				onChunk,
 				signal: this.#bashAbortController.signal,
 				sessionKey: this.sessionId,
-				timeout: clampTimeout("bash") * 1000,
+				timeout: timeoutMs || undefined,
+				backgroundPromise: backgroundDeferred.promise,
 			});
 
+			if ("backgrounded" in outcome && outcome.backgrounded) {
+				// Register the continuation with the async job manager
+				const manager = this.#asyncJobManager;
+				if (manager) {
+					const label = command.length > 120 ? `${command.slice(0, 117)}...` : command;
+					manager.register("bash", label, async () => {
+						const finalResult = await outcome.continuation;
+						const output = finalResult.output || "(no output)";
+						if (finalResult.cancelled) return `(cancelled) ${output}`;
+						if (finalResult.exitCode !== 0) return `(exit ${finalResult.exitCode}) ${output}`;
+						return output;
+					});
+				}
+				// Return a synthetic result for the TUI
+				const result: BashResult = {
+					output: "Command moved to background. Result will be delivered when complete.",
+					exitCode: 0,
+					cancelled: false,
+					truncated: false,
+					totalLines: 1,
+					totalBytes: 0,
+					outputLines: 1,
+					outputBytes: 0,
+				};
+				this.recordBashResult(command, result, options);
+				return result;
+			}
+
+			const result = outcome as BashResult;
 			this.recordBashResult(command, result, options);
 			return result;
 		} finally {
 			this.#bashAbortController = undefined;
+			this.#bashBackgroundDeferred = undefined;
 		}
 	}
 
@@ -5333,6 +5368,26 @@ export class AgentSession {
 	/** Whether a bash command is currently running */
 	get isBashRunning(): boolean {
 		return this.#bashAbortController !== undefined;
+	}
+
+	/**
+	 * Register a background deferred for the currently running bash command.
+	 * Called by BashTool.execute() when a foreground bash starts.
+	 */
+	setBashBackgroundDeferred(deferred: PromiseWithResolvers<void> | undefined): void {
+		this.#bashBackgroundDeferred = deferred;
+	}
+
+	/**
+	 * Signal the currently running bash command to move to background.
+	 * Returns true if a command was backgrounded.
+	 */
+	backgroundBash(): boolean {
+		const deferred = this.#bashBackgroundDeferred;
+		if (!deferred) return false;
+		deferred.resolve();
+		this.#bashBackgroundDeferred = undefined;
+		return true;
 	}
 
 	/** Whether there are pending bash messages waiting to be flushed */

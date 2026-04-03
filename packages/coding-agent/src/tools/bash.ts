@@ -6,7 +6,7 @@ import { ImageProtocol, TERMINAL, Text } from "@oh-my-pi/pi-tui";
 import { $env, getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
 import { Type } from "@sinclair/typebox";
 import { renderPromptTemplate } from "../config/prompt-templates";
-import { type BashResult, executeBash } from "../exec/bash-executor";
+import { type BashBackgroundedResult, type BashResult, executeBash } from "../exec/bash-executor";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { truncateToVisualLines } from "../modes/components/visual-truncate";
 import type { Theme } from "../modes/theme/theme";
@@ -39,7 +39,7 @@ const bashSchemaBase = Type.Object({
 				"Additional environment variables passed to the command and rendered inline as shell assignments; prefer this for multiline or quote-heavy content",
 		}),
 	),
-	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 300)" })),
+	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds. If omitted, waits for completion." })),
 	cwd: Type.Optional(Type.String({ description: "Working directory (default: cwd)" })),
 	head: Type.Optional(Type.Number({ description: "Return only first N lines of output" })),
 	tail: Type.Optional(Type.Number({ description: "Return only last N lines of output" })),
@@ -260,7 +260,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		{
 			command: rawCommand,
 			env: rawEnv,
-			timeout: rawTimeout = 300,
+			timeout: rawTimeout,
 			cwd,
 			head,
 			tail,
@@ -342,7 +342,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			throw new ToolError(`Working directory is not a directory: ${commandCwd}`);
 		}
 
-		// Clamp to reasonable range: 1s - 3600s (1 hour)
+		// 0 = no timeout (wait for completion), otherwise clamp to 1s-3600s
 		const timeoutSec = clampTimeout("bash", rawTimeout);
 		const timeoutMs = timeoutSec * 1000;
 
@@ -360,10 +360,11 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 					const { path: artifactPath, id: artifactId } =
 						(await this.session.allocateOutputArtifact?.("bash")) ?? {};
 					try {
-						const result = await executeBash(command, {
+						// No backgroundPromise passed — always returns BashResult
+						const result = (await executeBash(command, {
 							cwd: commandCwd,
 							sessionKey: `${this.session.getSessionId?.() ?? ""}:async:${jobId}`,
-							timeout: timeoutMs,
+							timeout: timeoutMs || undefined,
 							signal: runSignal,
 							env: resolvedEnv,
 							artifactPath,
@@ -372,7 +373,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 								tailBuffer.append(chunk);
 								void reportProgress(tailBuffer.text(), { async: { state: "running", jobId, type: "bash" } });
 							},
-						});
+						})) as BashResult;
 						const outputText = this.#formatResultOutput(result, headLines, tailLines);
 						const finalText = this.#buildResultText(result, timeoutSec, outputText);
 						await reportProgress(finalText, { async: { state: "completed", jobId, type: "bash" } });
@@ -402,55 +403,97 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		const { path: artifactPath, id: artifactId } = (await this.session.allocateOutputArtifact?.("bash")) ?? {};
 
 		const usePty = pty && $env.PI_NO_PTY !== "1" && ctx?.hasUI === true && ctx.ui !== undefined;
-		const result: BashResult | BashInteractiveResult = usePty
-			? await runInteractiveBashPty(ctx.ui!, {
-					command,
-					cwd: commandCwd,
-					timeoutMs,
-					signal,
-					env: resolvedEnv,
-					artifactPath,
-					artifactId,
-				})
-			: await executeBash(command, {
-					cwd: commandCwd,
-					sessionKey: this.session.getSessionId?.() ?? undefined,
-					timeout: timeoutMs,
-					signal,
-					env: resolvedEnv,
-					artifactPath,
-					artifactId,
-					onChunk: chunk => {
-						tailBuffer.append(chunk);
-						if (onUpdate) {
-							onUpdate({
-								content: [{ type: "text", text: tailBuffer.text() }],
-								details: {},
-							});
-						}
-					},
+
+		// For non-PTY, non-async foreground execution, set up background support (Ctrl+B)
+		const backgroundDeferred = !usePty ? Promise.withResolvers<void>() : undefined;
+		if (backgroundDeferred) {
+			this.session.setBashBackgroundDeferred?.(backgroundDeferred);
+		}
+
+		try {
+			const outcome: BashResult | BashBackgroundedResult | BashInteractiveResult = usePty
+				? await runInteractiveBashPty(ctx.ui!, {
+						command,
+						cwd: commandCwd,
+						timeoutMs,
+						signal,
+						env: resolvedEnv,
+						artifactPath,
+						artifactId,
+					})
+				: await executeBash(command, {
+						cwd: commandCwd,
+						sessionKey: this.session.getSessionId?.() ?? undefined,
+						timeout: timeoutMs || undefined,
+						signal,
+						env: resolvedEnv,
+						artifactPath,
+						artifactId,
+						backgroundPromise: backgroundDeferred?.promise,
+						onChunk: chunk => {
+							tailBuffer.append(chunk);
+							if (onUpdate) {
+								onUpdate({
+									content: [{ type: "text", text: tailBuffer.text() }],
+									details: {},
+								});
+							}
+						},
+					});
+
+			// Handle backgrounded result
+			if ("backgrounded" in outcome && outcome.backgrounded) {
+				const manager = this.session.asyncJobManager;
+				if (!manager) {
+					throw new ToolError("Cannot background: async job manager unavailable.");
+				}
+				const label = command.length > 120 ? `${command.slice(0, 117)}...` : command;
+				const jobId = manager.register("bash", label, async () => {
+					const finalResult = await outcome.continuation;
+					const outputText = this.#formatResultOutput(finalResult, headLines, tailLines);
+					return this.#buildResultText(finalResult, timeoutSec, outputText);
 				});
-		if (result.cancelled) {
-			if (signal?.aborted) {
-				throw new ToolAbortError(normalizeResultOutput(result) || "Command aborted");
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Command moved to background (job ${jobId}). Result will be delivered when complete.`,
+						},
+					],
+					details: { async: { state: "running", jobId, type: "bash" } },
+				};
 			}
-			throw new ToolError(normalizeResultOutput(result) || "Command aborted");
-		}
-		if (isInteractiveResult(result) && result.timedOut) {
-			throw new ToolError(normalizeResultOutput(result) || `Command timed out after ${timeoutSec} seconds`);
-		}
 
-		const outputText = this.#formatResultOutput(result, headLines, tailLines);
-		const details: BashToolDetails = {};
-		const resultBuilder = toolResult(details).text(outputText).truncationFromSummary(result, { direction: "tail" });
-		if (result.exitCode === undefined) {
-			throw new ToolError(`${outputText}\n\nCommand failed: missing exit status`);
-		}
-		if (result.exitCode !== 0 && result.exitCode !== undefined) {
-			throw new ToolError(`${outputText}\n\nCommand exited with code ${result.exitCode}`);
-		}
+			// Normal result handling
+			const result = outcome as BashResult | BashInteractiveResult;
+			if (result.cancelled) {
+				if (signal?.aborted) {
+					throw new ToolAbortError(normalizeResultOutput(result) || "Command aborted");
+				}
+				throw new ToolError(normalizeResultOutput(result) || "Command aborted");
+			}
+			if (isInteractiveResult(result) && result.timedOut) {
+				throw new ToolError(normalizeResultOutput(result) || `Command timed out after ${timeoutSec} seconds`);
+			}
 
-		return resultBuilder.done();
+			const outputText = this.#formatResultOutput(result, headLines, tailLines);
+			const details: BashToolDetails = {};
+			const resultBuilder = toolResult(details)
+				.text(outputText)
+				.truncationFromSummary(result, { direction: "tail" });
+			if (result.exitCode === undefined) {
+				throw new ToolError(`${outputText}\n\nCommand failed: missing exit status`);
+			}
+			if (result.exitCode !== 0 && result.exitCode !== undefined) {
+				throw new ToolError(`${outputText}\n\nCommand exited with code ${result.exitCode}`);
+			}
+
+			return resultBuilder.done();
+		} finally {
+			if (backgroundDeferred) {
+				this.session.setBashBackgroundDeferred?.(undefined);
+			}
+		}
 	}
 }
 

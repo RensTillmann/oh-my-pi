@@ -60,7 +60,7 @@ export class BashExecutionComponent extends Container {
 			ui,
 			spinner => theme.fg(colorKey, spinner),
 			text => theme.fg("muted", text),
-			`Running… (esc to cancel)`,
+			`Running… (esc to cancel, ctrl+b to background)`,
 			getSymbolTheme().spinnerFrames,
 		);
 		this.#contentContainer.addChild(this.#loader);

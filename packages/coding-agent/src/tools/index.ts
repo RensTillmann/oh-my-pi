@@ -155,6 +155,14 @@ export interface ToolSession {
 	agentOutputManager?: AgentOutputManager;
 	/** Async background job manager for bash/task async execution */
 	asyncJobManager?: AsyncJobManager;
+	/**
+	 * Register a background deferred for the currently running bash command.
+	 * When resolved (via Ctrl+B), the executor detaches and returns a continuation.
+	 * Call with `undefined` to clear.
+	 */
+	setBashBackgroundDeferred?: (deferred: PromiseWithResolvers<void> | undefined) => void;
+	/** Signal the currently running bash command to move to background. */
+	backgroundBash?: () => boolean;
 	/** Settings instance for passing to subagents */
 	settings: Settings;
 	/** Shared native search DB for grep/glob/fuzzyFind-backed workflows. */

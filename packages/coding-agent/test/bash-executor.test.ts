@@ -3,9 +3,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { executeBash } from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
+import { executeBash as _executeBash, type BashResult } from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
 import { DEFAULT_MAX_BYTES } from "@oh-my-pi/pi-coding-agent/session/streaming-output";
 import * as shellSnapshot from "@oh-my-pi/pi-coding-agent/utils/shell-snapshot";
+
+// None of these tests use backgroundPromise, so executeBash always returns BashResult.
+// Wrap to get proper typing without casts in every test.
+async function executeBash(command: string, options?: Parameters<typeof _executeBash>[1]): Promise<BashResult> {
+	return (await _executeBash(command, options)) as BashResult;
+}
 
 function makeTempDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "omp-bash-exec-"));

@@ -800,7 +800,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let session: AgentSession;
 
 	const enableLsp = options.enableLsp ?? true;
-	const asyncEnabled = settings.get("async.enabled");
 	const asyncMaxJobs = Math.min(100, Math.max(1, settings.get("async.maxJobs") ?? 100));
 	const ASYNC_INLINE_RESULT_MAX_CHARS = 12_000;
 	const ASYNC_PREVIEW_MAX_CHARS = 4_000;
@@ -824,32 +823,32 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 		return preview;
 	};
-	const asyncJobManager = asyncEnabled
-		? new AsyncJobManager({
-				maxRunningJobs: asyncMaxJobs,
-				onJobComplete: async (jobId, result, job) => {
-					if (!session) return;
-					const formattedResult = await formatAsyncResultForFollowUp(result);
-					const message = renderPromptTemplate(asyncResultTemplate, { jobId, result: formattedResult });
-					const durationMs = job ? Math.max(0, Date.now() - job.startTime) : undefined;
-					await session.sendCustomMessage(
-						{
-							customType: "async-result",
-							content: message,
-							display: true,
-							attribution: "agent",
-							details: {
-								jobId,
-								type: job?.type,
-								label: job?.label,
-								durationMs,
-							},
-						},
-						{ deliverAs: "followUp", triggerTurn: true },
-					);
+	// Always create the manager — even when async.enabled is off, Ctrl+B
+	// backgrounding needs it. The manager is idle when no jobs are registered.
+	const asyncJobManager = new AsyncJobManager({
+		maxRunningJobs: asyncMaxJobs,
+		onJobComplete: async (jobId, result, job) => {
+			if (!session) return;
+			const formattedResult = await formatAsyncResultForFollowUp(result);
+			const message = renderPromptTemplate(asyncResultTemplate, { jobId, result: formattedResult });
+			const durationMs = job ? Math.max(0, Date.now() - job.startTime) : undefined;
+			await session.sendCustomMessage(
+				{
+					customType: "async-result",
+					content: message,
+					display: true,
+					attribution: "agent",
+					details: {
+						jobId,
+						type: job?.type,
+						label: job?.label,
+						durationMs,
+					},
 				},
-			})
-		: undefined;
+				{ deliverAs: "followUp", triggerTurn: true },
+			);
+		},
+	});
 
 	const pendingActionStore = new PendingActionStore();
 	const toolSession: ToolSession = {
@@ -899,6 +898,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		authStorage,
 		modelRegistry,
 		asyncJobManager,
+		setBashBackgroundDeferred: deferred => session.setBashBackgroundDeferred(deferred),
+		backgroundBash: () => session.backgroundBash(),
 		pendingActionStore,
 	};
 

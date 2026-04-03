@@ -22,6 +22,12 @@ export interface BashExecutorOptions {
 	/** Artifact path/id for full output storage */
 	artifactPath?: string;
 	artifactId?: string;
+	/**
+	 * Promise that, when resolved, moves the command to background.
+	 * The process keeps running; the executor returns a backgrounded result
+	 * with a continuation promise for the final outcome.
+	 */
+	backgroundPromise?: Promise<void>;
 }
 
 export interface BashResult {
@@ -34,6 +40,16 @@ export interface BashResult {
 	outputLines: number;
 	outputBytes: number;
 	artifactId?: string;
+}
+
+/**
+ * Returned when a running command is moved to background via Ctrl+B.
+ * The process keeps running; `continuation` resolves with the final result.
+ */
+export interface BashBackgroundedResult {
+	backgrounded: true;
+	/** Resolves with the final BashResult when the backgrounded command completes */
+	continuation: Promise<BashResult>;
 }
 
 const HARD_TIMEOUT_GRACE_MS = 5_000;
@@ -53,7 +69,10 @@ async function resolveShellCwd(cwd: string | undefined): Promise<string | undefi
 	}
 }
 
-export async function executeBash(command: string, options?: BashExecutorOptions): Promise<BashResult> {
+export async function executeBash(
+	command: string,
+	options?: BashExecutorOptions,
+): Promise<BashResult | BashBackgroundedResult> {
 	const settings = await Settings.init();
 	const { shell, env: shellEnv, prefix } = settings.getShellConfig();
 	const snapshotPath = shell.includes("bash") ? await getOrCreateSnapshot(shell, shellEnv) : null;
@@ -120,12 +139,14 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 
 	let hardTimeoutTimer: NodeJS.Timeout | undefined;
 	const hardTimeoutDeferred = Promise.withResolvers<"hard-timeout">();
-	const baseTimeoutMs = Math.max(1_000, options?.timeout ?? 300_000);
-	const hardTimeoutMs = baseTimeoutMs + HARD_TIMEOUT_GRACE_MS;
-	hardTimeoutTimer = setTimeout(() => {
-		abortCurrentExecution();
-		hardTimeoutDeferred.resolve("hard-timeout");
-	}, hardTimeoutMs);
+	const baseTimeoutMs = options?.timeout ?? 0;
+	const hardTimeoutMs = baseTimeoutMs > 0 ? baseTimeoutMs + HARD_TIMEOUT_GRACE_MS : 0;
+	if (hardTimeoutMs > 0) {
+		hardTimeoutTimer = setTimeout(() => {
+			abortCurrentExecution();
+			hardTimeoutDeferred.resolve("hard-timeout");
+		}, hardTimeoutMs);
+	}
 
 	let resetSession = false;
 
@@ -160,10 +181,70 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 					},
 				);
 
-		const winner = await Promise.race([
-			runPromise.then(result => ({ kind: "result" as const, result })),
-			hardTimeoutDeferred.promise.then(() => ({ kind: "hard-timeout" as const })),
-		]);
+		type RaceOutcome =
+			| { kind: "result"; result: Awaited<typeof runPromise> }
+			| { kind: "hard-timeout" }
+			| { kind: "background" };
+		const racers: Promise<RaceOutcome>[] = [runPromise.then(result => ({ kind: "result" as const, result }))];
+		if (hardTimeoutMs > 0) {
+			racers.push(hardTimeoutDeferred.promise.then(() => ({ kind: "hard-timeout" as const })));
+		}
+		if (options?.backgroundPromise) {
+			racers.push(options.backgroundPromise.then(() => ({ kind: "background" as const })));
+		}
+		const winner = await Promise.race(racers);
+
+		// Backgrounded: detach process, return continuation for async job manager
+		if (winner.kind === "background") {
+			// Clear hard timeout — the continuation manages its own lifecycle
+			if (hardTimeoutTimer) {
+				clearTimeout(hardTimeoutTimer);
+				hardTimeoutTimer = undefined;
+			}
+			// Do NOT abort the process — it keeps running
+			if (userSignal) {
+				userSignal.removeEventListener("abort", abortHandler);
+			}
+			const continuation = (async (): Promise<BashResult> => {
+				let needsReset = false;
+				try {
+					const nativeResult = await runPromise;
+					if (nativeResult.timedOut) {
+						needsReset = true;
+						return {
+							exitCode: undefined,
+							cancelled: true,
+							...(await sink.dump("Command timed out")),
+						};
+					}
+					if (nativeResult.cancelled) {
+						needsReset = true;
+						return {
+							exitCode: undefined,
+							cancelled: true,
+							...(await sink.dump("Command cancelled")),
+						};
+					}
+					return {
+						exitCode: nativeResult.exitCode,
+						cancelled: false,
+						...(await sink.dump()),
+					};
+				} catch {
+					needsReset = true;
+					return {
+						exitCode: undefined,
+						cancelled: true,
+						...(await sink.dump("Command failed in background")),
+					};
+				} finally {
+					if (needsReset) {
+						shellSessions.delete(sessionKey);
+					}
+				}
+			})();
+			return { backgrounded: true as const, continuation };
+		}
 
 		if (winner.kind === "hard-timeout") {
 			if (shellSession) {
