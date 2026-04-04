@@ -11,7 +11,6 @@ import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
 import { isEnoent, untilAborted } from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
-import { unzipSync, zipSync } from "fflate";
 import { renderPromptTemplate } from "../config/prompt-templates";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { createLspWritethrough, type FileDiagnosticsResult, type WritethroughCallback, writethroughNoop } from "../lsp";
@@ -93,6 +92,19 @@ interface ResolvedArchiveWritePath {
 	archivePath: string;
 	archiveSubPath: string;
 	exists: boolean;
+}
+
+type FflateModule = {
+	unzipSync: (data: Uint8Array) => Record<string, Uint8Array>;
+	zipSync: (entries: Record<string, Uint8Array>) => Uint8Array;
+};
+
+let fflateModulePromise: Promise<FflateModule> | null = null;
+async function getFflate(): Promise<FflateModule> {
+	if (!fflateModulePromise) {
+		fflateModulePromise = import("fflate") as Promise<FflateModule>;
+	}
+	return fflateModulePromise;
 }
 
 function isArchivePathNotFound(error: unknown): boolean {
@@ -196,6 +208,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		resolvedArchivePath: ResolvedArchiveWritePath,
 	): Promise<AgentToolResult<WriteToolDetails>> {
 		const isZip = resolvedArchivePath.absolutePath.toLowerCase().endsWith(".zip");
+		const fflate = isZip ? await getFflate() : null;
 
 		const parentDir = path.dirname(resolvedArchivePath.absolutePath);
 		if (parentDir && parentDir !== ".") {
@@ -208,7 +221,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			if (resolvedArchivePath.exists) {
 				try {
 					const bytes = await Bun.file(resolvedArchivePath.absolutePath).bytes();
-					const existing = unzipSync(new Uint8Array(bytes));
+					const existing = fflate!.unzipSync(new Uint8Array(bytes));
 					for (const [entryPath, data] of Object.entries(existing)) {
 						zipEntries[entryPath.replace(/\\/g, "/")] = data;
 					}
@@ -220,7 +233,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			zipEntries[resolvedArchivePath.archiveSubPath] = new TextEncoder().encode(content);
 
 			try {
-				const zipBuffer = zipSync(zipEntries);
+				const zipBuffer = fflate!.zipSync(zipEntries);
 				await Bun.write(resolvedArchivePath.absolutePath, zipBuffer);
 			} catch (error) {
 				throw new ToolError(error instanceof Error ? error.message : String(error));

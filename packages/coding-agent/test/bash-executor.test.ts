@@ -414,3 +414,112 @@ describe("executeBash", () => {
 		expect(fs.existsSync(marker)).toBe(false);
 	});
 });
+
+describe("executeBash — backgroundPromise option", () => {
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = makeTempDir();
+		_resetSettingsForTest();
+		await Settings.init({ inMemory: true, cwd: tempDir });
+	});
+
+	afterEach(() => {
+		_resetSettingsForTest();
+		vi.restoreAllMocks();
+		if (fs.existsSync(tempDir)) {
+			fs.rmSync(tempDir, { recursive: true });
+		}
+	});
+
+	it("returns BashBackgroundedResult when backgroundPromise resolves before command finishes", async () => {
+		if (process.platform === "win32") return;
+		const bg = Promise.withResolvers<void>();
+		const resultPromise = _executeBash("sleep 5", {
+			cwd: tempDir,
+			backgroundPromise: bg.promise,
+			timeout: 10_000,
+		});
+		await Bun.sleep(50);
+		bg.resolve();
+		const result = await resultPromise;
+		expect("backgrounded" in result && result.backgrounded).toBe(true);
+	});
+
+	it("continuation resolves with output when backgrounded process completes normally", async () => {
+		if (process.platform === "win32") return;
+		const bg = Promise.withResolvers<void>();
+		const resultPromise = _executeBash("sleep 0.1 && echo completed", {
+			cwd: tempDir,
+			backgroundPromise: bg.promise,
+			timeout: 10_000,
+		});
+		await Bun.sleep(50);
+		bg.resolve();
+		const outcome = await resultPromise;
+		if (!("backgrounded" in outcome && outcome.backgrounded)) throw new Error("Expected backgrounded result");
+		const finalResult = await outcome.continuation;
+		expect(finalResult.cancelled).toBe(false);
+		expect(finalResult.output).toContain("completed");
+	});
+
+	it("cancel() kills the backgrounded process", async () => {
+		if (process.platform === "win32") return;
+		const marker = path.join(tempDir, "bg-cancel-marker.txt");
+		const markerEscaped = marker.replace(/'/g, "'\\\\'");
+		const bg = Promise.withResolvers<void>();
+		const resultPromise = _executeBash(`sleep 2 && echo done > '${markerEscaped}'`, {
+			cwd: tempDir,
+			backgroundPromise: bg.promise,
+			timeout: 10_000,
+		});
+		await Bun.sleep(50);
+		bg.resolve();
+		const outcome = await resultPromise;
+		if (!("backgrounded" in outcome && outcome.backgrounded)) throw new Error("Expected backgrounded result");
+		outcome.cancel();
+		const finalResult = await outcome.continuation;
+		expect(finalResult.cancelled).toBe(true);
+		await Bun.sleep(3000);
+		expect(fs.existsSync(marker)).toBe(false);
+	}, 8000);
+
+	it("returns normal BashResult when process finishes before backgroundPromise resolves", async () => {
+		if (process.platform === "win32") return;
+		const bg = Promise.withResolvers<void>();
+		const result = await _executeBash("echo immediate", {
+			cwd: tempDir,
+			backgroundPromise: bg.promise,
+			timeout: 10_000,
+		});
+		// Process finished before bg.resolve() — should be a normal BashResult
+		expect("backgrounded" in result && result.backgrounded).toBeFalsy();
+		const bashResult = result as BashResult;
+		expect(bashResult.output).toContain("immediate");
+		bg.resolve(); // clean up
+	});
+});
+
+describe("executeBash — no-timeout default", () => {
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = makeTempDir();
+		_resetSettingsForTest();
+		await Settings.init({ inMemory: true, cwd: tempDir });
+	});
+
+	afterEach(() => {
+		_resetSettingsForTest();
+		if (fs.existsSync(tempDir)) {
+			fs.rmSync(tempDir, { recursive: true });
+		}
+	});
+
+	it("completes without timeout when no timeout option given", async () => {
+		if (process.platform === "win32") return;
+		const result = await executeBash("sleep 0.1 && echo done", { cwd: tempDir });
+		expect(result.cancelled).toBe(false);
+		expect(result.output).toContain("done");
+	});
+});

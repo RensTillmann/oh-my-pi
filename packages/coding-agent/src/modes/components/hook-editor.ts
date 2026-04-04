@@ -49,8 +49,6 @@ export class HookEditorComponent extends Container {
 		// Editor
 		this.#editor = new Editor(getEditorTheme());
 		if (this.#promptStyle) {
-			this.#editor.setBorderVisible(false);
-			this.#editor.setPromptGutter("> ");
 			this.#editor.disableSubmit = true;
 		}
 		if (prefill) {

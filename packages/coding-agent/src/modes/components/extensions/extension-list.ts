@@ -36,7 +36,7 @@ const DEFAULT_MAX_VISIBLE = 15;
 /** Flattened list item for rendering */
 type ListItem =
 	| { type: "master"; providerId: string; providerName: string; enabled: boolean }
-	| { type: "kind-header"; kind: ExtensionKind; label: string; icon: string; count: number; activeCount: number }
+	| { type: "kind-header"; kind: ExtensionKind; label: string; count: number; activeCount: number }
 	| { type: "extension"; item: Extension };
 
 export class ExtensionList implements Component {
@@ -166,10 +166,14 @@ export class ExtensionList implements Component {
 			}
 		}
 
-		// Scroll indicator
+		// Footer: nav hints always; scroll position appended on the right when list overflows
+		const hintStr = theme.fg("dim", "▲▼ row  ◀▶ group  spc:toggle");
 		if (this.#listItems.length > this.#maxVisible) {
-			const indicator = theme.fg("muted", `  (${this.#selectedIndex + 1}/${this.#listItems.length})`);
-			lines.push(indicator);
+			const countStr = `(${this.#selectedIndex + 1}/${this.#listItems.length})`;
+			const gap = Math.max(1, width - visibleWidth(hintStr) - visibleWidth(countStr));
+			lines.push(hintStr + padding(gap) + theme.fg("muted", countStr));
+		} else {
+			lines.push(hintStr);
 		}
 
 		return lines;
@@ -197,7 +201,7 @@ export class ExtensionList implements Component {
 
 	#renderKindHeader(item: ListItem & { type: "kind-header" }, isSelected: boolean, width: number): string {
 		const countBadge = theme.fg("muted", `(${item.activeCount}/${item.count})`);
-		let line = `${item.icon} ${item.label} ${countBadge}`;
+		let line = `${item.label} ${countBadge}`;
 
 		if (isSelected) {
 			line = theme.bold(theme.fg("accent", line));
@@ -221,10 +225,9 @@ export class ExtensionList implements Component {
 		if (ext.state === "missing") {
 			name = theme.strikethrough(name);
 		}
-		const nameWidth = Math.min(24, width - 20);
 
 		// Origin badge: color reflects disable state across both scopes
-		const badgeLabel = ext.source.level === "project" ? "[L]" : "[G]";
+		const badgeLabel = ext.source.level === "project" ? "[P]" : ext.source.level === "user" ? "[U]" : "[N]";
 		const badgeColor = ext.isGlobalDisabled ? "error" : ext.isProjectDisabled ? "warning" : "muted";
 		const originBadge = theme.fg(badgeColor, badgeLabel);
 
@@ -232,7 +235,9 @@ export class ExtensionList implements Component {
 		const restrictBadge = ext.canRestrict && ext.isRestricted ? ` ${theme.fg("accent", "[R]")}` : "";
 
 		// Build the line with indentation
-		let line = `   ${stateIcon} ${originBadge}${restrictBadge} `;
+		const prefix = `   ${stateIcon} ${originBadge}${restrictBadge} `;
+		const nameWidth = Math.max(1, width - visibleWidth(prefix));
+		let line = prefix;
 
 		if (isSelected && !masterDisabled) {
 			name = theme.bold(theme.fg("accent", name));
@@ -246,50 +251,12 @@ export class ExtensionList implements Component {
 		const namePadded = this.#padText(name, nameWidth);
 		line += namePadded;
 
-		// Trigger hint
-		if (ext.trigger) {
-			const triggerStyle = effectivelyDisabled ? "dim" : "muted";
-			const remainingWidth = width - visibleWidth(line) - 2;
-			if (remainingWidth > 5) {
-				line += `  ${truncateToWidth(theme.fg(triggerStyle as "dim" | "muted", ext.trigger), remainingWidth)}`;
-			}
-		}
-
 		// Apply selection background
 		if (isSelected) {
 			line = theme.bg("selectedBg", line);
 		}
 
 		return truncateToWidth(line, width);
-	}
-
-	#getKindIcon(kind: ExtensionKind): string {
-		switch (kind) {
-			case "extension-module":
-				return theme.icon.extensionTool;
-			case "skill":
-				return theme.icon.extensionSkill;
-			case "tool":
-				return theme.icon.extensionTool;
-			case "slash-command":
-				return theme.icon.extensionSlashCommand;
-			case "mcp":
-				return theme.icon.extensionMcp;
-			case "rule":
-				return theme.icon.extensionRule;
-			case "hook":
-				return theme.icon.extensionHook;
-			case "prompt":
-				return theme.icon.extensionPrompt;
-			case "context-file":
-				return theme.icon.extensionContextFile;
-			case "append-system-prompt":
-				return theme.icon.extensionPrompt;
-			case "instruction":
-				return theme.icon.extensionInstruction;
-			default:
-				return theme.format.bullet;
-		}
 	}
 
 	#getStateIcon(state: ExtensionState, masterDisabled: boolean): string {
@@ -365,7 +332,6 @@ export class ExtensionList implements Component {
 				type: "kind-header",
 				kind,
 				label: this.#getKindLabel(kind),
-				icon: this.#getKindIcon(kind),
 				count: items.length,
 				activeCount,
 			});

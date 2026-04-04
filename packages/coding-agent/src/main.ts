@@ -24,7 +24,7 @@ import { Settings, settings } from "./config/settings";
 import { initializeWithSettings, isExtensionDisabled } from "./discovery";
 import { exportFromFile } from "./export/html";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
-import { InteractiveMode, runPrintMode, runRpcMode } from "./modes";
+import { InteractiveMode, runAcpMode, runPrintMode, runRpcMode } from "./modes";
 import { initTheme, stopThemeWatcher } from "./modes/theme/theme";
 import type { SubmittedUserInput } from "./modes/types";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "./sdk";
@@ -717,7 +717,9 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 		process.exit(1);
 	}
 
-	if (mode === "rpc") {
+	if (mode === "acp") {
+		await runAcpMode(session);
+	} else if (mode === "rpc") {
 		await runRpcMode(session);
 	} else if (isInteractive) {
 		const versionCheckPromise = checkForNewVersion(VERSION).catch(() => undefined);

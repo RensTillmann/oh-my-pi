@@ -276,3 +276,13 @@ export const searchToolBm25Renderer = {
 	mergeCallAndResult: true,
 	inline: true,
 };
+
+/**
+ * Compatibility shim for selector controller integrations in newer wiring.
+ * This tool currently does not persist a dedicated code-search provider state.
+ */
+export function setPreferredCodeSearchProvider(_provider: string): void {}
+
+export function isCodeSearchProviderId(value: string): boolean {
+	return value === "bm25" || value === "mcp";
+}

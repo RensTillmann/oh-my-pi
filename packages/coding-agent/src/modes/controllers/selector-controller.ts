@@ -4,7 +4,7 @@ import { getOAuthProviders, type OAuthProvider } from "@oh-my-pi/pi-ai";
 import type { Component, SelectItem } from "@oh-my-pi/pi-tui";
 import { Input, Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath, getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
-import { MODEL_ROLES } from "../../config/model-registry";
+import { MODEL_ROLES, type ModelRole } from "../../config/model-registry";
 import { settings } from "../../config/settings";
 import { DebugSelectorComponent } from "../../debug";
 import { disableProvider, enableProvider } from "../../discovery";
@@ -81,7 +81,7 @@ export class SelectorController {
 		this.ctx.editorContainer.clear();
 		this.ctx.editorContainer.addChild(component);
 		this.ctx.ui.setFocus(focus);
-		this.ctx.ui.requestRender();
+		this.ctx.ui.requestRender(true);
 	}
 
 	showSettingsSelector(): void {
@@ -177,7 +177,6 @@ export class SelectorController {
 			this.ctx.settings,
 			this.ctx.ui.terminal.rows,
 			this.ctx.mcpManager,
-			this.ctx.ui,
 		);
 		this.showSelector(done => {
 			dashboard.onClose = () => {
@@ -567,7 +566,7 @@ export class SelectorController {
 							// Don't call done() - selector stays open for role assignment
 						} else {
 							// Other roles (smol, slow): just update settings, not current model
-							const roleInfo = MODEL_ROLES[role];
+							const roleInfo = MODEL_ROLES[role as ModelRole];
 							const roleLabel = roleInfo?.name ?? role;
 							this.ctx.showStatus(`${roleLabel} model: ${model.id}`);
 							// Don't call done() - selector stays open

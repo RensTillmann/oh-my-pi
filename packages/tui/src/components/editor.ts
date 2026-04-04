@@ -605,7 +605,7 @@ export class Editor implements Component, Focusable {
 			let displayText = hasTabs ? replaceTabs(rawText) : rawText;
 			let displayWidth = visibleWidth(displayText);
 			let cursorInPadding = false;
-			
+
 			// Add cursor if this line has it
 			const hasCursor = layoutLine.hasCursor && layoutLine.cursorPos !== undefined;
 			const marker = emitCursorMarker ? CURSOR_MARKER : "";
@@ -704,7 +704,7 @@ export class Editor implements Component, Focusable {
 		// Handle character jump mode (awaiting next character to jump to)
 		if (this.#jumpMode !== null) {
 			// Cancel if the hotkey is pressed again
-			if (kb.matches(data, "jumpForward") || kb.matches(data, "jumpBackward")) {
+			if (kb.matches(data, "tui.editor.jumpForward") || kb.matches(data, "tui.editor.jumpBackward")) {
 				this.#jumpMode = null;
 				return;
 			}
@@ -1023,9 +1023,9 @@ export class Editor implements Component, Focusable {
 			this.#insertCharacter(" ");
 		}
 		// Character jump mode triggers
-		else if (kb.matches(data, "jumpForward")) {
+		else if (kb.matches(data, "tui.editor.jumpForward")) {
 			this.#jumpMode = "forward";
-		} else if (kb.matches(data, "jumpBackward")) {
+		} else if (kb.matches(data, "tui.editor.jumpBackward")) {
 			this.#jumpMode = "backward";
 		}
 		// Printable keystrokes, including Kitty CSI-u text-producing sequences.
@@ -1404,7 +1404,7 @@ export class Editor implements Component, Focusable {
 	#shouldSubmitOnBackslashEnter(data: string, kb: EditorKeybindingsManager): boolean {
 		if (this.disableSubmit) return false;
 		if (!matchesKey(data, "enter")) return false;
-		const submitKeys = kb.getKeys("submit");
+		const submitKeys = kb.getKeys("tui.input.submit");
 		const hasShiftEnter = submitKeys.includes("shift+enter") || submitKeys.includes("shift+return");
 		if (!hasShiftEnter) return false;
 

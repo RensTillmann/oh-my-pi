@@ -25,6 +25,7 @@ import {
 import { Settings, type SkillsSettings } from "./config/settings";
 import { CursorExecHandlers } from "./cursor";
 import "./discovery";
+import type { SearchDb } from "@oh-my-pi/pi-natives";
 import { resolveConfigValue } from "./config/resolve-config-value";
 import { initializeWithSettings } from "./discovery";
 import { TtsrManager } from "./export/ttsr";
@@ -197,6 +198,9 @@ export interface CreateAgentSessionOptions {
 
 	/** Settings instance. Default: Settings.init({ cwd, agentDir }) */
 	settings?: Settings;
+
+	/** Shared native search DB for grep/glob/fuzzyFind-backed workflows. */
+	searchDb?: SearchDb;
 
 	/** Whether UI is available (enables interactive tools like ask). Default: false */
 	hasUI?: boolean;
@@ -1515,6 +1519,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		ttsrManager,
 		obfuscator,
 		asyncJobManager,
+		searchDb: options.searchDb,
 		pendingActionStore,
 	});
 

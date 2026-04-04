@@ -536,10 +536,13 @@ export class StatusLineComponent implements Component {
 			return [];
 		}
 
-		const sortedStatuses = Array.from(this.#hookStatuses.entries())
-			.sort(([a], [b]) => a.localeCompare(b))
-			.map(([, text]) => sanitizeStatusText(text));
-		const hookLine = sortedStatuses.join(" ");
-		return [truncateToWidth(hookLine, width)];
+		const lines: string[] = [];
+		for (const [, text] of Array.from(this.#hookStatuses.entries()).sort(([a], [b]) => a.localeCompare(b))) {
+			for (const part of text.split("\n")) {
+				const sanitized = sanitizeStatusText(part);
+				if (sanitized) lines.push(truncateToWidth(sanitized, width));
+			}
+		}
+		return lines;
 	}
 }

@@ -14,7 +14,7 @@ import { KeybindingsManager } from "../config/keybindings";
 import { renderPromptTemplate } from "../config/prompt-templates";
 import { type Settings, settings } from "../config/settings";
 import type { ExtensionUIContext, ExtensionUIDialogOptions } from "../extensibility/extensions";
-import type { CompactOptions } from "../extensibility/extensions/types";
+import type { CompactOptions, ExtensionWidgetContent, ExtensionWidgetOptions } from "../extensibility/extensions/types";
 import { BUILTIN_SLASH_COMMANDS, loadSlashCommands } from "../extensibility/slash-commands";
 import { resolveLocalUrlToPath } from "../internal-urls";
 import { renameApprovedPlanFile } from "../plan-mode/approved-plan";
@@ -92,6 +92,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	statusContainer: Container;
 	todoContainer: Container;
 	btwContainer: Container;
+	hookWidgetContainerAbove: Container;
+	hookWidgetContainerBelow: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
 	statusLine: StatusLineComponent;
@@ -197,6 +199,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.statusContainer = new Container();
 		this.todoContainer = new Container();
 		this.btwContainer = new Container();
+		this.hookWidgetContainerAbove = new Container();
+		this.hookWidgetContainerBelow = new Container();
 		this.editor = new CustomEditor(getEditorTheme());
 		this.editor.setUseTerminalCursor(this.ui.getShowHardwareCursor());
 		this.editor.setAutocompleteMaxVisible(settings.get("autocompleteMaxVisible"));
@@ -264,7 +268,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	async init(): Promise<void> {
 		if (this.isInitialized) return;
 
-		this.keybindings = await logger.timeAsync("InteractiveMode.init:keybindings", () => KeybindingsManager.create());
+		this.keybindings = KeybindingsManager.create();
 
 		// Register session manager flush for signal handlers (SIGINT, SIGTERM, SIGHUP)
 		this.#cleanupUnsubscribe = postmortem.register("session-manager-flush", () => this.sessionManager.flush());
@@ -329,9 +333,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.addChild(this.statusContainer);
 		this.ui.addChild(this.todoContainer);
 		this.ui.addChild(this.btwContainer);
+		this.ui.addChild(this.hookWidgetContainerAbove);
 		this.ui.addChild(this.statusLine); // Only renders hook statuses (main status in editor border)
 		this.ui.addChild(new Spacer(1));
 		this.ui.addChild(this.editorContainer);
+		this.ui.addChild(this.hookWidgetContainerBelow);
 		this.ui.setFocus(this.editor);
 
 		this.#inputController.setupKeyHandlers();
@@ -462,6 +468,15 @@ export class InteractiveMode implements InteractiveModeContext {
 	finishPendingSubmission(input: SubmittedUserInput): void {
 		if (this.#pendingSubmittedInput === input) {
 			this.#pendingSubmittedInput = undefined;
+		}
+		// Extension commands return from prompt() without starting the agent,
+		// so no agent_end event fires to stop the loading animation. Clean up here.
+		// This is a no-op for normal prompts (agent_end already stopped it).
+		if (this.loadingAnimation) {
+			this.loadingAnimation.stop();
+			this.loadingAnimation = undefined;
+			this.statusContainer.clear();
+			this.ui.requestRender();
 		}
 	}
 
@@ -1320,6 +1335,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#selectorController.showSessionSelector();
 	}
 
+	handleToolsCommand(): void {
+		this.#commandController.handleToolsCommand();
+	}
+
+	showPluginSelector(_mode?: "install" | "uninstall"): void {
+		// TODO: Wire PluginSelectorComponent via SelectorController
+		logger.warn("showPluginSelector not yet wired");
+	}
+
 	handleResumeSession(sessionPath: string): Promise<void> {
 		this.#btwController.dispose();
 		return this.#selectorController.handleResumeSession(sessionPath);
@@ -1441,8 +1465,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		return this.#extensionUiController.emitCustomToolSessionEvent(reason, previousSessionFile);
 	}
 
-	setHookWidget(key: string, content: unknown): void {
-		this.#extensionUiController.setHookWidget(key, content);
+	setHookWidget(key: string, content: ExtensionWidgetContent, options?: ExtensionWidgetOptions): void {
+		this.#extensionUiController.setHookWidget(key, content, options);
 	}
 
 	setHookStatus(key: string, text: string | undefined): void {

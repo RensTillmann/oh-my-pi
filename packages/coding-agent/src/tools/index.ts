@@ -162,7 +162,7 @@ export interface ToolSession {
 	 */
 	setBashBackgroundDeferred?: (deferred: PromiseWithResolvers<void> | undefined) => void;
 	/** Signal the currently running bash command to move to background. */
-	backgroundBash?: () => boolean;
+	backgroundBash?: () => void;
 	/** Settings instance for passing to subagents */
 	settings: Settings;
 	/** Shared native search DB for grep/glob/fuzzyFind-backed workflows. */

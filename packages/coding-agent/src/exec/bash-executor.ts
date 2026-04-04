@@ -5,6 +5,7 @@
  */
 import * as fs from "node:fs/promises";
 import { executeShell, Shell } from "@oh-my-pi/pi-natives";
+import { logger } from "@oh-my-pi/pi-utils";
 import { Settings } from "../config/settings";
 import { OutputSink } from "../session/streaming-output";
 import { getOrCreateSnapshot } from "../utils/shell-snapshot";
@@ -31,6 +32,7 @@ export interface BashExecutorOptions {
 }
 
 export interface BashResult {
+	backgrounded?: false; // discriminant for BashResult | BashBackgroundedResult union
 	output: string;
 	exitCode: number | undefined;
 	cancelled: boolean;
@@ -50,6 +52,8 @@ export interface BashBackgroundedResult {
 	backgrounded: true;
 	/** Resolves with the final BashResult when the backgrounded command completes */
 	continuation: Promise<BashResult>;
+	/** Aborts the underlying process when called */
+	cancel: () => void;
 }
 
 const HARD_TIMEOUT_GRACE_MS = 5_000;
@@ -230,20 +234,37 @@ export async function executeBash(
 						cancelled: false,
 						...(await sink.dump()),
 					};
-				} catch {
+				} catch (err) {
 					needsReset = true;
-					return {
-						exitCode: undefined,
-						cancelled: true,
-						...(await sink.dump("Command failed in background")),
-					};
+					logger.warn("Background bash command failed", {
+						sessionKey,
+						error: err instanceof Error ? err.message : String(err),
+					});
+					try {
+						return {
+							exitCode: undefined,
+							cancelled: true,
+							...(await sink.dump("Command failed in background")),
+						};
+					} catch {
+						return {
+							exitCode: undefined,
+							cancelled: true,
+							output: "Command failed in background",
+							truncated: false,
+							totalLines: 0,
+							totalBytes: 0,
+							outputLines: 0,
+							outputBytes: 0,
+						};
+					}
 				} finally {
 					if (needsReset) {
 						shellSessions.delete(sessionKey);
 					}
 				}
 			})();
-			return { backgrounded: true as const, continuation };
+			return { backgrounded: true as const, continuation, cancel: abortCurrentExecution };
 		}
 
 		if (winner.kind === "hard-timeout") {

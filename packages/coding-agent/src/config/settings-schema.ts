@@ -1272,17 +1272,6 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	"browser.screenshotDir": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "tools",
-			label: "Screenshot directory",
-			description:
-				"Directory to save screenshots. If unset, screenshots go to a temp file. Supports ~. Examples: ~/Downloads, ~/Desktop, /sdcard/Download (Android)",
-		},
-	},
-
 	// Tool execution
 	"tools.intentTracing": {
 		type: "boolean",
@@ -1542,6 +1531,17 @@ export const SETTINGS_SCHEMA = {
 			tab: "providers",
 			label: "Web Search Provider",
 			description: "Provider for web search tool",
+			submenu: true,
+		},
+	},
+	"providers.codeSearch": {
+		type: "enum",
+		values: ["bm25", "mcp"] as const,
+		default: "bm25",
+		ui: {
+			tab: "providers",
+			label: "Code Search Provider",
+			description: "Provider for code search tools",
 			submenu: true,
 		},
 	},

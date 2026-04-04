@@ -209,7 +209,6 @@ export async function loadAllExtensions(
 				name: server.name,
 				displayName: server.name,
 				description: server.command || server.url,
-				trigger: server.transport || "stdio",
 				path: server._source.path,
 				source: sourceFromMeta(server._source),
 				state,
@@ -256,7 +255,6 @@ export async function loadAllExtensions(
 				const firstLine = c.content.split("\n").find(l => l.trim() && !l.startsWith("---"));
 				return firstLine?.slice(0, 80) || undefined;
 			},
-			getTrigger: c => `/${c.name}`,
 		});
 	} catch (error) {
 		logger.warn("Failed to load slash-commands capability", { error: String(error) });
@@ -365,7 +363,6 @@ export async function loadAllExtensions(
 				name,
 				displayName: name,
 				description: file.level === "user" ? "User-level context" : "Project-level context",
-				trigger: file.level,
 				path: file.path,
 				source: sourceFromMeta(file._source),
 				state,
@@ -432,7 +429,6 @@ export async function loadAllExtensions(
 					item.level === "user"
 						? "Appended to system prompt for all projects"
 						: "Appended to system prompt for this project",
-				trigger: item.level,
 				path: item.path,
 				source: sourceFromMeta(item._source),
 				state,
@@ -678,6 +674,9 @@ export function buildProviderTabs(extensions: Extension[]): ProviderTab[] {
 export function filterByProvider(extensions: Extension[], providerId: string): Extension[] {
 	if (providerId === "all") {
 		return extensions;
+	}
+	if (providerId === "system-prompt") {
+		return extensions.filter(ext => ext.kind === "append-system-prompt");
 	}
 	return extensions.filter(ext => ext.source.provider === providerId);
 }

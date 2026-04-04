@@ -1,6 +1,4 @@
 import { untilAborted } from "@oh-my-pi/pi-utils";
-import type { StreamInfo } from "markit-ai";
-import { Markit } from "markit-ai";
 import { ToolAbortError } from "../tools/tool-errors";
 
 export interface MarkitConversionResult {
@@ -9,7 +7,26 @@ export interface MarkitConversionResult {
 	error?: string;
 }
 
-const markit = new Markit();
+type StreamInfo = {
+	extension: string;
+	filename: string;
+};
+
+interface MarkitLike {
+	convertFile(filePath: string): Promise<{ markdown?: string }>;
+	convert(buffer: Buffer, streamInfo: StreamInfo): Promise<{ markdown?: string }>;
+}
+
+let markitPromise: Promise<MarkitLike> | null = null;
+async function getMarkit(): Promise<MarkitLike> {
+	if (!markitPromise) {
+		markitPromise = import("markit-ai").then(mod => {
+			const MarkitCtor = (mod as { Markit: new () => MarkitLike }).Markit;
+			return new MarkitCtor();
+		});
+	}
+	return markitPromise;
+}
 
 function normalizeExtension(extension: string): string {
 	const trimmed = extension.trim().toLowerCase();
@@ -48,6 +65,7 @@ function finalizeConversion(markdown?: string): MarkitConversionResult {
 
 export async function convertFileWithMarkit(filePath: string, signal?: AbortSignal): Promise<MarkitConversionResult> {
 	try {
+		const markit = await getMarkit();
 		const result = await runMarkitConversion(() => markit.convertFile(filePath), signal);
 		return finalizeConversion(result.markdown);
 	} catch (error) {
@@ -70,6 +88,7 @@ export async function convertBufferWithMarkit(
 	};
 
 	try {
+		const markit = await getMarkit();
 		const result = await runMarkitConversion(() => markit.convert(Buffer.from(buffer), streamInfo), signal);
 		return finalizeConversion(result.markdown);
 	} catch (error) {

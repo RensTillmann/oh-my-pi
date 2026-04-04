@@ -265,6 +265,46 @@ export class KeybindingsManager {
 	}
 }
 
+export type EditorAction = Keybinding;
+export type EditorKeybindingsConfig = Partial<Record<EditorAction, KeyId | KeyId[]>>;
+
+export const DEFAULT_EDITOR_KEYBINDINGS: Record<EditorAction, KeyId | KeyId[]> = Object.fromEntries(
+	Object.entries(TUI_KEYBINDINGS).map(([action, def]) => [action as EditorAction, def.defaultKeys]),
+) as Record<EditorAction, KeyId | KeyId[]>;
+
+export class EditorKeybindingsManager {
+	#manager: KeybindingsManager;
+
+	constructor(config: EditorKeybindingsConfig = {}) {
+		this.#manager = new KeybindingsManager(TUI_KEYBINDINGS, config as KeybindingsConfig);
+	}
+
+	matches(data: string, action: EditorAction): boolean {
+		return this.#manager.matches(data, action);
+	}
+
+	getKeys(action: EditorAction): KeyId[] {
+		return this.#manager.getKeys(action);
+	}
+}
+
+let editorKeybindingsManager: EditorKeybindingsManager | null = null;
+
+export function setEditorKeybindings(manager: EditorKeybindingsManager): void {
+	editorKeybindingsManager = manager;
+}
+
+/**
+ * Returns a shared keybinding manager for editor/input actions.
+ * Kept as a stable export because editor.ts consumes this helper directly.
+ */
+export function getEditorKeybindings(): EditorKeybindingsManager {
+	if (!editorKeybindingsManager) {
+		editorKeybindingsManager = new EditorKeybindingsManager();
+	}
+	return editorKeybindingsManager;
+}
+
 let globalKeybindings: KeybindingsManager | null = null;
 
 export function setKeybindings(keybindings: KeybindingsManager): void {

@@ -445,14 +445,38 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			if ("backgrounded" in outcome && outcome.backgrounded) {
 				const manager = this.session.asyncJobManager;
 				if (!manager) {
+					outcome.cancel();
 					throw new ToolError("Cannot background: async job manager unavailable.");
 				}
 				const label = command.length > 120 ? `${command.slice(0, 117)}...` : command;
-				const jobId = manager.register("bash", label, async () => {
-					const finalResult = await outcome.continuation;
-					const outputText = this.#formatResultOutput(finalResult, headLines, tailLines);
-					return this.#buildResultText(finalResult, timeoutSec, outputText);
-				});
+				let jobId: string;
+				try {
+					jobId = manager.register("bash", label, async ({ jobId: jId, signal, reportProgress }) => {
+						signal.addEventListener("abort", () => outcome.cancel(), { once: true });
+						try {
+							const finalResult = await outcome.continuation;
+							const outputText = this.#formatResultOutput(finalResult, headLines, tailLines);
+							const finalText = this.#buildResultText(finalResult, timeoutSec, outputText);
+							await reportProgress(finalText, {
+								async: { state: "completed", jobId: jId, type: "bash" },
+							});
+							return finalText;
+						} catch (error) {
+							const message = error instanceof Error ? error.message : String(error);
+							await reportProgress(message, {
+								async: { state: "failed", jobId: jId, type: "bash" },
+							});
+							throw error;
+						}
+					});
+				} catch (err) {
+					// register() threw (e.g. job limit reached). Process is already detached — kill it.
+					outcome.continuation.catch(() => {});
+					outcome.cancel();
+					throw new ToolError(
+						`${err instanceof Error ? err.message : String(err)}. The command has been terminated.`,
+					);
+				}
 				return {
 					content: [
 						{

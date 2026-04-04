@@ -1,4 +1,3 @@
-import { unzipSync } from "fflate";
 import { ToolError } from "./tool-errors";
 
 export type ArchiveFormat = "zip" | "tar" | "tar.gz";
@@ -34,6 +33,18 @@ interface ZipStorage {
 }
 
 type EntryStorage = TarStorage | ZipStorage;
+
+type FflateModule = {
+	unzipSync: (data: Uint8Array) => Record<string, Uint8Array>;
+};
+
+let fflateModulePromise: Promise<FflateModule> | null = null;
+async function getFflate(): Promise<FflateModule> {
+	if (!fflateModulePromise) {
+		fflateModulePromise = import("fflate") as Promise<FflateModule>;
+	}
+	return fflateModulePromise;
+}
 
 interface ArchiveIndexEntry extends ArchiveNode {
 	storage?: EntryStorage;
@@ -150,10 +161,11 @@ async function readTarEntries(bytes: Uint8Array): Promise<ArchiveIndexEntry[]> {
 	return entries;
 }
 
-function readZipEntries(bytes: Uint8Array): ArchiveIndexEntry[] {
+async function readZipEntries(bytes: Uint8Array): Promise<ArchiveIndexEntry[]> {
 	let files: Record<string, Uint8Array>;
 	try {
-		files = unzipSync(bytes);
+		const fflate = await getFflate();
+		files = fflate.unzipSync(bytes);
 	} catch (error) {
 		throw new ToolError(error instanceof Error ? error.message : String(error));
 	}
@@ -310,6 +322,6 @@ export async function openArchive(filePath: string): Promise<ArchiveReader> {
 	}
 
 	const bytes = await Bun.file(filePath).bytes();
-	const entries = format === "zip" ? readZipEntries(bytes) : await readTarEntries(bytes);
+	const entries = format === "zip" ? await readZipEntries(bytes) : await readTarEntries(bytes);
 	return new ArchiveReader(format, entries);
 }

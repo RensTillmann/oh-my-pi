@@ -5291,21 +5291,62 @@ export class AgentSession {
 			});
 
 			if ("backgrounded" in outcome && outcome.backgrounded) {
-				// Register the continuation with the async job manager
 				const manager = this.#asyncJobManager;
-				if (manager) {
-					const label = command.length > 120 ? `${command.slice(0, 117)}...` : command;
-					manager.register("bash", label, async () => {
+				if (!manager) {
+					// No job manager: can't track the backgrounded process, so kill it
+					outcome.cancel();
+					logger.warn("Cannot background bash: async job manager unavailable", {
+						sessionId: this.sessionId,
+					});
+					const result: BashResult = {
+						output: "Command could not be moved to background (job manager unavailable).",
+						exitCode: undefined,
+						cancelled: true,
+						truncated: false,
+						totalLines: 1,
+						totalBytes: 0,
+						outputLines: 1,
+						outputBytes: 0,
+					};
+					this.recordBashResult(command, result, options);
+					return result;
+				}
+				const label = command.length > 120 ? `${command.slice(0, 117)}...` : command;
+				let jobId: string;
+				try {
+					jobId = manager.register("bash", label, async ({ signal }) => {
+						signal.addEventListener("abort", () => outcome.cancel(), { once: true });
 						const finalResult = await outcome.continuation;
 						const output = finalResult.output || "(no output)";
 						if (finalResult.cancelled) return `(cancelled) ${output}`;
 						if (finalResult.exitCode !== 0) return `(exit ${finalResult.exitCode}) ${output}`;
 						return output;
 					});
+				} catch (err) {
+					// register() threw (e.g. job limit). Process already detached — kill it.
+					outcome.continuation.catch(() => {});
+					outcome.cancel();
+					logger.warn("Failed to register background bash job", {
+						error: err instanceof Error ? err.message : String(err),
+						sessionId: this.sessionId,
+					});
+					const result: BashResult = {
+						output: `Command could not be moved to background: ${
+							err instanceof Error ? err.message : String(err)
+						}`,
+						exitCode: undefined,
+						cancelled: true,
+						truncated: false,
+						totalLines: 1,
+						totalBytes: 0,
+						outputLines: 1,
+						outputBytes: 0,
+					};
+					this.recordBashResult(command, result, options);
+					return result;
 				}
-				// Return a synthetic result for the TUI
 				const result: BashResult = {
-					output: "Command moved to background. Result will be delivered when complete.",
+					output: `Command moved to background (job ${jobId}). Result will be delivered when complete.`,
 					exitCode: 0,
 					cancelled: false,
 					truncated: false,
@@ -5380,14 +5421,12 @@ export class AgentSession {
 
 	/**
 	 * Signal the currently running bash command to move to background.
-	 * Returns true if a command was backgrounded.
 	 */
-	backgroundBash(): boolean {
+	backgroundBash(): void {
 		const deferred = this.#bashBackgroundDeferred;
-		if (!deferred) return false;
+		if (!deferred) return;
 		deferred.resolve();
 		this.#bashBackgroundDeferred = undefined;
-		return true;
 	}
 
 	/** Whether there are pending bash messages waiting to be flushed */

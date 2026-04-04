@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { $env, getNativesDir, logger } from "@oh-my-pi/pi-utils";
-import packageJson from "../package.json";
+import packageJson from "../package.json" with { type: "json" };
 import type { NativeBindings } from "./bindings";
 import { embeddedAddon } from "./embedded-addon";
 import "./appearance/types";

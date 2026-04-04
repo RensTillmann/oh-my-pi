@@ -10,7 +10,6 @@ import * as pythonExecutor from "@oh-my-pi/pi-coding-agent/ipy/executor";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { TOOL_TIMEOUTS } from "@oh-my-pi/pi-coding-agent/tools/tool-timeouts";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 describe("AgentSession user shortcut hooks", () => {
@@ -179,7 +178,7 @@ describe("AgentSession user shortcut hooks", () => {
 		).toBe(true);
 	});
 
-	it("passes the default native timeout to fallback bash execution", async () => {
+	it("passes undefined timeout to fallback bash execution when bash default is no-timeout", async () => {
 		vi.spyOn(bashExecutor, "executeBash").mockResolvedValue({
 			output: "bash fallback",
 			exitCode: 0,
@@ -197,7 +196,7 @@ describe("AgentSession user shortcut hooks", () => {
 		expect(bashExecutor.executeBash).toHaveBeenCalledWith(
 			"pwd",
 			expect.objectContaining({
-				timeout: TOOL_TIMEOUTS.bash.default * 1000,
+				timeout: undefined,
 				sessionKey: expect.any(String),
 				signal: expect.any(AbortSignal),
 			}),
