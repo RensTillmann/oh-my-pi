@@ -23,6 +23,7 @@ const SEGMENT_INFO: Record<StatusLineSegmentId, { label: string; short: string }
 	git: { label: "Git", short: "branch/status" },
 	pr: { label: "PR", short: "pull request" },
 	subagents: { label: "Agents", short: "subagent count" },
+	bg_jobs: { label: "Bg Jobs", short: "background jobs" },
 	token_in: { label: "Tokens In", short: "input tokens" },
 	token_out: { label: "Tokens Out", short: "output tokens" },
 	token_total: { label: "Tokens", short: "total tokens" },

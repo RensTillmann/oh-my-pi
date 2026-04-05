@@ -97,6 +97,7 @@
 		"statusLineOutput": "maroon",
 		"statusLineCost": "maroon",
 		"statusLineSubagents": "peach",
+		"statusLineBgJobs": "peach",
 		"pythonMode": "yellow"
 	},
 	"export": {

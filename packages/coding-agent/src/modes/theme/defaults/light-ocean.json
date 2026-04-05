@@ -89,6 +89,7 @@
 		"statusLineOutput": 110,
 		"statusLineCost": 173,
 		"statusLineSubagents": "oceanTeal",
+		"statusLineBgJobs": "oceanTeal",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

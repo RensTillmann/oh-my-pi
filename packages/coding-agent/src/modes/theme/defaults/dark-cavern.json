@@ -81,6 +81,7 @@
 		"statusLineOutput": "crystalBlue",
 		"statusLineCost": "amber",
 		"statusLineSubagents": "crystalBlue",
+		"statusLineBgJobs": "crystalBlue",
 		"pythonMode": "amber"
 	},
 	"export": {

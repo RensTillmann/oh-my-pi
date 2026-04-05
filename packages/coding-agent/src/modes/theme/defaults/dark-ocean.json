@@ -91,6 +91,7 @@
 		"statusLineOutput": 204,
 		"statusLineCost": 204,
 		"statusLineSubagents": "coral",
+		"statusLineBgJobs": "coral",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

@@ -86,6 +86,7 @@
 		"statusLineOutput": "walnut",
 		"statusLineCost": "earth",
 		"statusLineSubagents": "moss",
+		"statusLineBgJobs": "moss",
 		"pythonMode": "amber"
 	},
 	"export": {

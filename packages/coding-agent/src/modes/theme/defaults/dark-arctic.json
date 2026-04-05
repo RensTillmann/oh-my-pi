@@ -94,6 +94,7 @@
 		"statusLineOutput": 139,
 		"statusLineCost": 139,
 		"statusLineSubagents": "iceBlue",
+		"statusLineBgJobs": "iceBlue",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

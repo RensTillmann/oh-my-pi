@@ -81,6 +81,7 @@
 		"statusLineOutput": "afterglow",
 		"statusLineCost": "sunset",
 		"statusLineSubagents": "rose",
+		"statusLineBgJobs": "rose",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

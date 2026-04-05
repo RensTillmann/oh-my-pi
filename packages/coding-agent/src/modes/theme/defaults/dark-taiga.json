@@ -81,6 +81,7 @@
 		"statusLineOutput": "frostBlue",
 		"statusLineCost": "emberAmber",
 		"statusLineSubagents": "auroraGreen",
+		"statusLineBgJobs": "auroraGreen",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

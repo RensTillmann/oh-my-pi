@@ -81,6 +81,7 @@
 		"statusLineOutput": "heronBlue",
 		"statusLineCost": "warningGold",
 		"statusLineSubagents": "heronBlue",
+		"statusLineBgJobs": "heronBlue",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

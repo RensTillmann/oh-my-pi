@@ -89,6 +89,7 @@
 		"statusLineOutput": 205,
 		"statusLineCost": 205,
 		"statusLineSubagents": "golden",
+		"statusLineBgJobs": "golden",
 		"pythonMode": "amber"
 	},
 	"export": {

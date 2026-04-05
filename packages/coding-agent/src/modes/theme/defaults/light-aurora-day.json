@@ -81,6 +81,7 @@
 		"statusLineOutput": "ink",
 		"statusLineCost": "rose",
 		"statusLineSubagents": "mint",
+		"statusLineBgJobs": "mint",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

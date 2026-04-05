@@ -88,6 +88,7 @@
 		"statusLineOutput": "monokaiPink",
 		"statusLineCost": "monokaiPink",
 		"statusLineSubagents": "monokaiOrange",
+		"statusLineBgJobs": "monokaiOrange",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

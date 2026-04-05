@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import { formatCount } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
 import { settings } from "../../config/settings";
 import type { StatusLinePreset, StatusLineSegmentId, StatusLineSeparatorStyle } from "../../config/settings-schema";
@@ -54,6 +53,7 @@ export class StatusLineComponent implements Component {
 	#autoCompactEnabled: boolean = true;
 	#hookStatuses: Map<string, string> = new Map();
 	#subagentCount: number = 0;
+	#bgJobCount: number = 0;
 	#sessionStartTime: number = Date.now();
 	#planModeStatus: { enabled: boolean; paused: boolean } | null = null;
 
@@ -91,6 +91,10 @@ export class StatusLineComponent implements Component {
 
 	setSubagentCount(count: number): void {
 		this.#subagentCount = count;
+	}
+
+	setBgJobCount(count: number): void {
+		this.#bgJobCount = count;
 	}
 
 	setSessionStartTime(time: number): void {
@@ -376,6 +380,7 @@ export class StatusLineComponent implements Component {
 			contextWindow,
 			autoCompactEnabled: this.#autoCompactEnabled,
 			subagentCount: this.#subagentCount,
+			bgJobCount: this.#bgJobCount,
 			sessionStartTime: this.#sessionStartTime,
 			git: {
 				branch: this.#getCurrentBranch(),
@@ -448,12 +453,6 @@ export class StatusLineComponent implements Component {
 			}
 		}
 
-		const runningBackgroundJobs = this.session.getAsyncJobSnapshot()?.running.length ?? 0;
-		if (runningBackgroundJobs > 0) {
-			const icon = theme.icon.agents ? `${theme.icon.agents} ` : "";
-			const label = `${formatCount("job", runningBackgroundJobs)} running`;
-			rightParts.push(theme.fg("statusLineSubagents", `${icon}${label}`));
-		}
 		const topFillWidth = Math.max(0, width);
 		const left = [...leftParts];
 		const right = [...rightParts];

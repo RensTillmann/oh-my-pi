@@ -80,6 +80,7 @@
 		"statusLineOutput": "ice",
 		"statusLineCost": "aurora",
 		"statusLineSubagents": "aurora",
+		"statusLineBgJobs": "aurora",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

@@ -15,6 +15,7 @@ export interface AsyncJob {
 	abortController: AbortController;
 	promise: Promise<void>;
 	resultText?: string;
+	endTime?: number;
 	errorText?: string;
 }
 
@@ -52,6 +53,7 @@ export class AsyncJobManager {
 	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
 	readonly #maxRunningJobs: number;
 	readonly #retentionMs: number;
+	#onJobCountChange?: (running: number) => void;
 	#deliveryLoop: Promise<void> | undefined;
 	#disposed = false;
 
@@ -59,6 +61,10 @@ export class AsyncJobManager {
 		this.#onJobComplete = options.onJobComplete;
 		this.#maxRunningJobs = Math.max(1, Math.floor(options.maxRunningJobs ?? DEFAULT_MAX_RUNNING_JOBS));
 		this.#retentionMs = Math.max(0, Math.floor(options.retentionMs ?? DEFAULT_RETENTION_MS));
+	}
+
+	setOnJobCountChange(callback: (running: number) => void): void {
+		this.#onJobCountChange = callback;
 	}
 
 	register(
@@ -112,28 +118,49 @@ export class AsyncJobManager {
 				const text = await run({ jobId: id, signal: abortController.signal, reportProgress });
 				if (job.status === "cancelled") {
 					job.resultText = text;
+					job.endTime = Date.now();
 					this.#scheduleEviction(id);
 					return;
 				}
 				job.status = "completed";
+				job.endTime = Date.now();
 				job.resultText = text;
+				try {
+					this.#notifyJobCountChange();
+				} catch (callbackErr) {
+					logger.warn("Job count callback threw during completion", {
+						jobId: id,
+						error: callbackErr instanceof Error ? callbackErr.message : String(callbackErr),
+					});
+				}
 				this.#enqueueDelivery(id, text);
 				this.#scheduleEviction(id);
 			} catch (error) {
 				if (job.status === "cancelled") {
 					job.errorText = error instanceof Error ? error.message : String(error);
+					job.endTime = Date.now();
 					this.#scheduleEviction(id);
 					return;
 				}
 				const errorText = error instanceof Error ? error.message : String(error);
 				job.status = "failed";
+				job.endTime = Date.now();
 				job.errorText = errorText;
+				try {
+					this.#notifyJobCountChange();
+				} catch (callbackErr) {
+					logger.warn("Job count callback threw during failure", {
+						jobId: id,
+						error: callbackErr instanceof Error ? callbackErr.message : String(callbackErr),
+					});
+				}
 				this.#enqueueDelivery(id, errorText);
 				this.#scheduleEviction(id);
 			}
 		})();
 
 		this.#jobs.set(id, job);
+		this.#notifyJobCountChange();
 		return id;
 	}
 
@@ -142,7 +169,9 @@ export class AsyncJobManager {
 		if (!job) return false;
 		if (job.status !== "running") return false;
 		job.status = "cancelled";
+		job.endTime = Date.now();
 		job.abortController.abort();
+		this.#notifyJobCountChange();
 		this.#scheduleEviction(id);
 		return true;
 	}
@@ -272,6 +301,10 @@ export class AsyncJobManager {
 			candidate = `${base}-${suffix}`;
 		}
 		return candidate;
+	}
+
+	#notifyJobCountChange(): void {
+		this.#onJobCountChange?.(this.getRunningJobs().length);
 	}
 
 	#scheduleEviction(jobId: string): void {

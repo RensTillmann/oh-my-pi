@@ -81,6 +81,7 @@
 		"statusLineOutput": "ironRed",
 		"statusLineCost": "sunsetOrange",
 		"statusLineSubagents": "ironRed",
+		"statusLineBgJobs": "ironRed",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

@@ -88,6 +88,7 @@
 		"statusLineOutput": "#f222ff",
 		"statusLineCost": "#f222ff",
 		"statusLineSubagents": "retroPink",
+		"statusLineBgJobs": "retroPink",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

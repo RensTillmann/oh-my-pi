@@ -84,6 +84,7 @@
 		"statusLineOutput": "gray7",
 		"statusLineCost": "gray7",
 		"statusLineSubagents": "accent",
+		"statusLineBgJobs": "accent",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

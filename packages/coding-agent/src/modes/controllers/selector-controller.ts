@@ -37,6 +37,7 @@ import { InlineFileEditorComponent } from "../components/extensions/inline-file-
 import { HistorySearchComponent } from "../components/history-search";
 import { ModelSelectorComponent } from "../components/model-selector";
 import { OAuthSelectorComponent } from "../components/oauth-selector";
+import { PsDashboard } from "../components/ps";
 import { SessionSelectorComponent } from "../components/session-selector";
 import { SettingsSelectorComponent } from "../components/settings-selector";
 import { ToolExecutionComponent } from "../components/tool-execution";
@@ -351,6 +352,26 @@ export class SelectorController {
 		});
 		this.showSelector(done => {
 			dashboard.onClose = () => {
+				done();
+				this.ctx.ui.requestRender();
+			};
+			dashboard.onRequestRender = () => {
+				this.ctx.ui.requestRender();
+			};
+			return { component: dashboard, focus: dashboard };
+		});
+	}
+
+	/**
+	 * Show the Background Process Manager dashboard.
+	 */
+	showPsDashboard(): void {
+		const manager = this.ctx.session.asyncJobManager;
+		if (!manager) return;
+		const dashboard = PsDashboard.create(manager, this.ctx.ui.terminal.rows);
+		this.showSelector(done => {
+			dashboard.onClose = () => {
+				dashboard.dispose();
 				done();
 				this.ctx.ui.requestRender();
 			};

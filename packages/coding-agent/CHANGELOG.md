@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `bg_jobs` status line segment showing the count of running background jobs
+- Added `/ps` slash command (alias: `/processes`) — interactive dashboard for listing, inspecting, and killing background jobs
+- Added `statusLineBgJobs` color key to all themes
+- Added `icon.bgJobs` symbol to theme icon set
+- Added `bg_jobs` to `default`, `full`, and `nerd` status line presets
+
+### Fixed
+
+- Fixed UI callback exceptions inside `AsyncJobManager` could corrupt job status (completed/failed mis-classification)
+- Fixed `setInterval` poll in `/ps` dashboard had no error guard; uncaught exception could crash the process
+- Fixed completed/failed job durations grew forever; added `endTime` field to `AsyncJob` populated at all terminal transitions
+- Fixed phantom scroll indicator in `/ps` inspector when switching between jobs (`#fullContentLength` not reset)
+- Fixed section-header navigation in `/ps` job list used single-step skip; replaced with loop to handle adjacent headers
+- Fixed `/ps` dashboard initial selection could land on a section header
+- Fixed stale kill-confirm prompt persisted after targeted job completed during confirmation interval
+
 ## [13.17.5] - 2026-04-01
 ### Added
 

@@ -80,6 +80,7 @@
 		"statusLineOutput": "star",
 		"statusLineCost": "magenta",
 		"statusLineSubagents": "magenta",
+		"statusLineBgJobs": "magenta",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

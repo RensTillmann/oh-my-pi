@@ -608,6 +608,10 @@ export class AgentSession {
 		return this.#ttsrAbortPending;
 	}
 
+	get asyncJobManager(): AsyncJobManager | undefined {
+		return this.#asyncJobManager;
+	}
+
 	getAsyncJobSnapshot(options?: { recentLimit?: number }): AsyncJobSnapshot | null {
 		if (!this.#asyncJobManager) return null;
 		const running = this.#asyncJobManager.getRunningJobs().map(job => ({

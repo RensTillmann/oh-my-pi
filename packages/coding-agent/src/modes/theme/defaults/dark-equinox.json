@@ -80,6 +80,7 @@
 		"statusLineOutput": "light",
 		"statusLineCost": "warm",
 		"statusLineSubagents": "warm",
+		"statusLineBgJobs": "warm",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

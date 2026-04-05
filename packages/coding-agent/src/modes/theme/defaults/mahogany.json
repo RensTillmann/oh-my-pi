@@ -87,6 +87,7 @@
 		"statusLineOutput": 138,
 		"statusLineCost": 138,
 		"statusLineSubagents": "brass",
+		"statusLineBgJobs": "brass",
 		"pythonMode": "amber"
 	},
 	"export": {

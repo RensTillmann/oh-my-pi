@@ -38,6 +38,7 @@ export interface SegmentContext {
 	contextWindow: number;
 	autoCompactEnabled: boolean;
 	subagentCount: number;
+	bgJobCount: number;
 	sessionStartTime: number;
 	git: {
 		branch: string | null;

@@ -183,6 +183,17 @@ const subagentsSegment: StatusLineSegment = {
 	},
 };
 
+const bgJobsSegment: StatusLineSegment = {
+	id: "bg_jobs",
+	render(ctx) {
+		if (ctx.bgJobCount === 0) {
+			return { content: "", visible: false };
+		}
+		const content = withIcon(theme.icon.bgJobs, `${ctx.bgJobCount}`);
+		return { content: theme.fg("statusLineBgJobs", content), visible: true };
+	},
+};
+
 const tokenInSegment: StatusLineSegment = {
 	id: "token_in",
 	render(ctx) {
@@ -366,6 +377,7 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	git: gitSegment,
 	pr: prSegment,
 	subagents: subagentsSegment,
+	bg_jobs: bgJobsSegment,
 	token_in: tokenInSegment,
 	token_out: tokenOutSegment,
 	token_total: tokenTotalSegment,

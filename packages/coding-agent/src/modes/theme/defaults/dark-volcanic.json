@@ -81,6 +81,7 @@
 		"statusLineOutput": "emberGold",
 		"statusLineCost": "sulfurYellow",
 		"statusLineSubagents": "magmaOrange",
+		"statusLineBgJobs": "magmaOrange",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

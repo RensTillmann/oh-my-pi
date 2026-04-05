@@ -80,6 +80,7 @@
 		"statusLineOutput": "swampCyan",
 		"statusLineCost": "fireflyGold",
 		"statusLineSubagents": "fireflyGold",
+		"statusLineBgJobs": "fireflyGold",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

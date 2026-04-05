@@ -87,6 +87,7 @@
 		"statusLineOutput": "magenta",
 		"statusLineCost": "orange",
 		"statusLineSubagents": "blue",
+		"statusLineBgJobs": "blue",
 		"pythonMode": "yellow"
 	},
 	"export": {

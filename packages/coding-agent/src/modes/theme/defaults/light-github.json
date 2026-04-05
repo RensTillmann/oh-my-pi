@@ -105,6 +105,7 @@
 		"statusLineOutput": "outputColor",
 		"statusLineCost": "costColor",
 		"statusLineSubagents": "subagentsColor",
+		"statusLineBgJobs": "subagentsColor",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

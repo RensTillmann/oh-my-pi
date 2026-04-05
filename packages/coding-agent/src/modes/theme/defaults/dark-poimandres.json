@@ -105,7 +105,8 @@
     "statusLineUntracked": 229,
     "statusLineOutput": "poimandresLowerBlue",
     "statusLineCost": "poimandresPink",
-    "statusLineSubagents": "poimandresDesaturatedGreen"
+    "statusLineSubagents": "poimandresDesaturatedGreen",
+    "statusLineBgJobs": "poimandresDesaturatedGreen"
   },
   "export": {
     "pageBg": "poimandresBg",

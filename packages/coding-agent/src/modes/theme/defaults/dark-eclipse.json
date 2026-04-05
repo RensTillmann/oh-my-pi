@@ -81,6 +81,7 @@
 		"statusLineOutput": "silver",
 		"statusLineCost": "corona",
 		"statusLineSubagents": "corona",
+		"statusLineBgJobs": "corona",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

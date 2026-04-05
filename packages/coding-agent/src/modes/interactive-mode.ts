@@ -225,6 +225,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.editorContainer.addChild(this.editor);
 		this.statusLine = new StatusLineComponent(session);
 		this.statusLine.setAutoCompactEnabled(session.autoCompactionEnabled);
+		session.asyncJobManager?.setOnJobCountChange(count => {
+			this.statusLine.setBgJobCount(count);
+			this.updateEditorTopBorder();
+			this.ui.requestRender();
+		});
 
 		this.hideThinkingBlock = settings.get("hideThinkingBlock");
 
@@ -1317,6 +1322,10 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	showAgentsDashboard(): void {
 		void this.#selectorController.showAgentsDashboard();
+	}
+
+	showPsDashboard(): void {
+		this.#selectorController.showPsDashboard();
 	}
 
 	showModelSelector(options?: { temporaryOnly?: boolean }): void {

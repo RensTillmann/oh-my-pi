@@ -92,6 +92,7 @@
 		"statusLineOutput": "magenta",
 		"statusLineCost": "red",
 		"statusLineSubagents": "cyan",
+		"statusLineBgJobs": "cyan",
 		"pythonMode": "yellow"
 	},
 	"export": {

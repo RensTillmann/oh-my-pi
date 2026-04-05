@@ -85,6 +85,7 @@
 		"statusLineOutput": 133,
 		"statusLineCost": 133,
 		"statusLineSubagents": "mossSage",
+		"statusLineBgJobs": "mossSage",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

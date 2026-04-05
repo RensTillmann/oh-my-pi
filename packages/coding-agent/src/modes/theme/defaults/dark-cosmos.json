@@ -80,6 +80,7 @@
 		"statusLineOutput": "starlight",
 		"statusLineCost": "nebula",
 		"statusLineSubagents": "nebula",
+		"statusLineBgJobs": "nebula",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

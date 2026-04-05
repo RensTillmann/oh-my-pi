@@ -81,6 +81,7 @@
 		"statusLineOutput": "$cream",
 		"statusLineCost": "$copper",
 		"statusLineSubagents": "$vein",
+		"statusLineBgJobs": "$vein",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

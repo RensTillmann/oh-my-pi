@@ -80,6 +80,7 @@
 		"statusLineOutput": "charcoal",
 		"statusLineCost": "blue",
 		"statusLineSubagents": "blue",
+		"statusLineBgJobs": "blue",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

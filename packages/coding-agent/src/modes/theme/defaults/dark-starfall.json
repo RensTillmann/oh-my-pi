@@ -81,6 +81,7 @@
 		"statusLineOutput": "spark",
 		"statusLineCost": "gold",
 		"statusLineSubagents": "gold",
+		"statusLineBgJobs": "gold",
 		"pythonMode": "gold"
 	},
 	"export": {

@@ -82,6 +82,7 @@
 		"statusLineOutput": 209,
 		"statusLineCost": 209,
 		"statusLineSubagents": "phosphorBright",
+		"statusLineBgJobs": "phosphorBright",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

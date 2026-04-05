@@ -86,6 +86,7 @@
 		"statusLineOutput": 213,
 		"statusLineCost": 213,
 		"statusLineSubagents": "amethyst",
+		"statusLineBgJobs": "amethyst",
 		"pythonMode": "gold"
 	},
 	"export": {

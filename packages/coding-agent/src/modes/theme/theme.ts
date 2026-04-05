@@ -101,6 +101,7 @@ export type SymbolKey =
 	| "icon.time"
 	| "icon.pi"
 	| "icon.agents"
+	| "icon.bgJobs"
 	| "icon.cache"
 	| "icon.input"
 	| "icon.output"
@@ -261,6 +262,7 @@ const UNICODE_SYMBOLS: SymbolMap = {
 	"icon.time": "⏱",
 	"icon.pi": "π",
 	"icon.agents": "👥",
+	"icon.bgJobs": "⏳",
 	"icon.cache": "💾",
 	"icon.input": "⤵",
 	"icon.output": "⤴",
@@ -484,6 +486,8 @@ const NERD_SYMBOLS: SymbolMap = {
 	"icon.pi": "\ue22c",
 	// pick:  | alt: 
 	"icon.agents": "\uf0c0",
+	// pick: 󰔟 | alt:  ⏳
+	"icon.bgJobs": "\uf0ae",
 	// pick:  | alt:  
 	"icon.cache": "\uf1c0",
 	// pick:  | alt:  →
@@ -673,6 +677,7 @@ const ASCII_SYMBOLS: SymbolMap = {
 	"icon.time": "t:",
 	"icon.pi": "pi",
 	"icon.agents": "AG",
+	"icon.bgJobs": "bg:",
 	"icon.cache": "cache",
 	"icon.input": "in:",
 	"icon.output": "out:",
@@ -883,6 +888,7 @@ const ThemeJsonSchema = Type.Object({
 		statusLineOutput: ColorValueSchema,
 		statusLineCost: ColorValueSchema,
 		statusLineSubagents: ColorValueSchema,
+		statusLineBgJobs: ColorValueSchema,
 	}),
 	export: Type.Optional(
 		Type.Object({
@@ -958,7 +964,8 @@ export type ThemeColor =
 	| "statusLineUntracked"
 	| "statusLineOutput"
 	| "statusLineCost"
-	| "statusLineSubagents";
+	| "statusLineSubagents"
+	| "statusLineBgJobs";
 
 /** Set of all valid ThemeColor string values for runtime validation */
 const THEME_COLOR_RECORD = {
@@ -1021,6 +1028,7 @@ const THEME_COLOR_RECORD = {
 	statusLineOutput: true,
 	statusLineCost: true,
 	statusLineSubagents: true,
+	statusLineBgJobs: true,
 } satisfies Record<ThemeColor, true>;
 
 const VALID_THEME_COLORS: ReadonlySet<string> = new Set(Object.keys(THEME_COLOR_RECORD));
@@ -1444,6 +1452,7 @@ export class Theme {
 			time: this.#symbols["icon.time"],
 			pi: this.#symbols["icon.pi"],
 			agents: this.#symbols["icon.agents"],
+			bgJobs: this.#symbols["icon.bgJobs"],
 			cache: this.#symbols["icon.cache"],
 			input: this.#symbols["icon.input"],
 			output: this.#symbols["icon.output"],

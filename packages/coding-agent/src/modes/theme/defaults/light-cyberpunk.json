@@ -86,6 +86,7 @@
 		"statusLineOutput": "deepMagenta",
 		"statusLineCost": "neonPink",
 		"statusLineSubagents": "neonMagenta",
+		"statusLineBgJobs": "neonMagenta",
 		"pythonMode": "#f0c040"
 	},
 	"export": {

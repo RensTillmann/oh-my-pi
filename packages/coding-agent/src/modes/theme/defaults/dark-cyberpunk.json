@@ -92,6 +92,7 @@
 		"statusLineOutput": "#EA00D9",
 		"statusLineCost": "#FF6F61",
 		"statusLineSubagents": "accent",
+		"statusLineBgJobs": "accent",
 		"pythonMode": "#f0c040"
 	},
 	"export": {
