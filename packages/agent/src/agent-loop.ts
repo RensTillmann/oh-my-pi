@@ -48,7 +48,7 @@ export function agentLoop(
 		}
 
 		await runLoop(currentContext, newMessages, config, signal, stream, streamFn);
-	})();
+	})().catch(err => stream.fail(err));
 
 	return stream;
 }
@@ -85,7 +85,7 @@ export function agentLoopContinue(
 		stream.push({ type: "turn_start" });
 
 		await runLoop(currentContext, newMessages, config, signal, stream, streamFn);
-	})();
+	})().catch(err => stream.fail(err));
 
 	return stream;
 }

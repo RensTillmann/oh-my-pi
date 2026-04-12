@@ -543,13 +543,25 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 	}
 
 	async #closeBrowser(): Promise<void> {
-		await this.#clearElementCache();
-		if (this.#page && !this.#page.isClosed()) {
-			await this.#page.close();
+		try {
+			await this.#clearElementCache();
+		} catch {
+			/* already dead */
+		}
+		if (this.#page) {
+			try {
+				if (!this.#page.isClosed()) await this.#page.close();
+			} catch {
+				/* frame detached or connection lost */
+			}
 		}
 		this.#page = null;
-		if (this.#browser?.connected) {
-			await this.#browser.close();
+		if (this.#browser) {
+			try {
+				if (this.#browser.connected) await this.#browser.close();
+			} catch {
+				/* already disconnected */
+			}
 		}
 		this.#browser = null;
 		this.#browserSession = null;
@@ -613,8 +625,18 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 		if (this.#currentHeadless !== null && this.#currentHeadless !== desiredHeadless) {
 			return this.#resetBrowser(params);
 		}
-		if (this.#page && !this.#page.isClosed()) {
-			return this.#page;
+		if (this.#page) {
+			try {
+				if (!this.#page.isClosed()) {
+					// Verify the page is actually usable — isClosed() can return false
+					// even when the underlying frame/session has been destroyed.
+					await this.#page.evaluate(() => true);
+					return this.#page;
+				}
+			} catch {
+				// Page reference is stale (detached frame, closed session, etc.)
+				// Fall through to reset.
+			}
 		}
 		if (!this.#browser?.isConnected()) {
 			return this.#resetBrowser(params);
@@ -1462,6 +1484,11 @@ export class BrowserTool implements AgentTool<typeof browserSchema, BrowserToolD
 			if (error instanceof ToolAbortError) throw error;
 			if (error instanceof Error && error.name === "AbortError") {
 				throw new ToolAbortError();
+			}
+			// Detect unrecoverable browser state (detached frame, closed session)
+			// and force-reset so the next call can start fresh.
+			if (error instanceof Error && /detach|Session closed|Protocol error/i.test(error.message)) {
+				await this.#closeBrowser();
 			}
 			throw error;
 		}

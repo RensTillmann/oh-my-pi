@@ -7,13 +7,15 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
 	done = false;
 	finalResultPromise: Promise<R>;
 	resolveFinalResult!: (result: R) => void;
+	rejectFinalResult!: (error: unknown) => void;
 	isComplete: (event: T) => boolean;
 	extractResult: (event: T) => R;
 
 	constructor(isComplete: (event: T) => boolean, extractResult: (event: T) => R) {
-		const { promise, resolve } = Promise.withResolvers<R>();
+		const { promise, resolve, reject } = Promise.withResolvers<R>();
 		this.finalResultPromise = promise;
 		this.resolveFinalResult = resolve;
+		this.rejectFinalResult = reject;
 		this.isComplete = isComplete;
 		this.extractResult = extractResult;
 	}
@@ -41,6 +43,20 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
 			waiter({ value: event, done: false });
 		} else {
 			this.queue.push(event);
+		}
+	}
+
+	/**
+	 * Reject the result promise and end the stream.
+	 * Use when the producer encounters an unrecoverable error.
+	 */
+	fail(error: unknown): void {
+		if (this.done) return;
+		this.done = true;
+		this.rejectFinalResult(error);
+		while (this.waiting.length > 0) {
+			const waiter = this.waiting.shift()!;
+			waiter({ value: undefined as any, done: true });
 		}
 	}
 

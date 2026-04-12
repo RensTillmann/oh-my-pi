@@ -35,7 +35,13 @@ import { isAnthropicOAuthToken, normalizeToolCallId, resolveCacheRetention } fro
 import { createAbortSourceTracker } from "../utils/abort";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { finalizeErrorMessage, type RawHttpRequestDump } from "../utils/http-inspector";
-import { createFirstEventWatchdog, getStreamFirstEventTimeoutMs, markFirstStreamEvent } from "../utils/idle-iterator";
+import {
+	createFirstEventWatchdog,
+	getAnthropicStreamIdleTimeoutMs,
+	getStreamFirstEventTimeoutMs,
+	iterateWithIdleTimeout,
+	markFirstStreamEvent,
+} from "../utils/idle-iterator";
 import { parseStreamingJson } from "../utils/json-parse";
 import {
 	buildCopilotDynamicHeaders,
@@ -696,7 +702,17 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 						activeAbortTracker.abortLocally(firstEventTimeoutAbortError),
 					);
 
-					for await (const event of markFirstStreamEvent(anthropicStream, firstEventWatchdog)) {
+					for await (const event of iterateWithIdleTimeout(
+						markFirstStreamEvent(anthropicStream, firstEventWatchdog),
+						{
+							// firstItemTimeoutMs=0: the first-event watchdog already guards
+							// the initial wait; only enforce idle timeout between events.
+							firstItemTimeoutMs: 0,
+							idleTimeoutMs: getAnthropicStreamIdleTimeoutMs(),
+							errorMessage: "Anthropic stream idle timeout — no SSE event received between events",
+							onIdle: () => activeAbortTracker.abortLocally(new Error("Anthropic stream idle timeout")),
+						},
+					)) {
 						started = true;
 						if (event.type === "message_start") {
 							output.responseId = event.message.id;
