@@ -308,3 +308,46 @@ module.exports.SamplingFilter = {
   Lanczos3: 5,
 };
 // --- end generated const enum exports ---
+
+// --- JS fallbacks for functions added after the compiled .node binary ---
+// Only used when the native addon predates the Rust implementation.
+if (!module.exports.formatAnchor) {
+	module.exports.formatAnchor = function formatAnchor(name, checksum, style, omitChecksum) {
+		if (omitChecksum) {
+			const omitMap = { full: 'full-omit', kind: 'kind-omit', bare: 'none' };
+			style = omitMap[style] || style;
+		}
+		const kind = name.includes('_') ? name.slice(0, name.indexOf('_')) : name;
+		switch (style) {
+			case 'full': return `@${name}#${checksum}`;
+			case 'kind': return `@${kind}#${checksum}`;
+			case 'bare': return `@#${checksum}`;
+			case 'full-omit': return `@${name}`;
+			case 'kind-omit': return `@${kind}`;
+			case 'none': return '';
+			default: return `@${name}#${checksum}`;
+		}
+	};
+}
+// --- end JS fallbacks ---
+
+// --- JS fallbacks for classes added after the compiled .node binary ---
+if (!module.exports.MacOSPowerAssertion) {
+	class MacOSPowerAssertion {
+		static start() { return new MacOSPowerAssertion(); }
+		stop() {}
+	}
+	module.exports.MacOSPowerAssertion = MacOSPowerAssertion;
+}
+if (!module.exports.ChunkState) {
+	class ChunkState {
+		static parse() {
+			throw new Error(
+				"ChunkState requires a native binary rebuild. " +
+				"The installed pi_natives .node predates this class.\n" +
+				"Rebuild: LIBRARY_PATH=/usr/lib/aarch64-linux-gnu bun --cwd=packages/natives run build"
+			);
+		}
+	}
+	module.exports.ChunkState = ChunkState;
+}

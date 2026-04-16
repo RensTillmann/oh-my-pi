@@ -12,7 +12,7 @@ export { Ellipsis } from "@oh-my-pi/pi-natives";
 export { getDefaultTabWidth, getIndentation } from "@oh-my-pi/pi-utils";
 
 export function sliceWithWidth(line: string, startCol: number, length: number, strict?: boolean | null): SliceResult {
-	return nativeSliceWithWidth(line, startCol, length, strict, getDefaultTabWidth());
+	return nativeSliceWithWidth(line, startCol, length, strict ?? false, getDefaultTabWidth());
 }
 
 export function truncateToWidth(
@@ -21,7 +21,7 @@ export function truncateToWidth(
 	ellipsisKind?: Ellipsis | null,
 	pad?: boolean | null,
 ): string {
-	return nativeTruncateToWidth(text, maxWidth, ellipsisKind, pad, getDefaultTabWidth());
+	return nativeTruncateToWidth(text, maxWidth, ellipsisKind ?? 0, pad ?? false, getDefaultTabWidth());
 }
 
 export function wrapTextWithAnsi(text: string, width: number): string[] {
