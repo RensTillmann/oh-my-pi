@@ -4,7 +4,8 @@ import { getOAuthProviders, type OAuthProvider } from "@oh-my-pi/pi-ai";
 import type { Component, SelectItem } from "@oh-my-pi/pi-tui";
 import { Input, Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath, getProjectDir, isEnoent } from "@oh-my-pi/pi-utils";
-import { MODEL_ROLES, type ModelRole } from "../../config/model-registry";
+import { getRoleInfo } from "../../config/model-registry";
+import { formatModelSelectorValue } from "../../config/model-resolver";
 import { settings } from "../../config/settings";
 import { DebugSelectorComponent } from "../../debug";
 import { disableProvider, enableProvider } from "../../discovery";
@@ -38,11 +39,13 @@ import { HistorySearchComponent } from "../components/history-search";
 import { ModelSelectorComponent } from "../components/model-selector";
 import { OAuthSelectorComponent } from "../components/oauth-selector";
 import { PsDashboard } from "../components/ps";
+import { SessionObserverOverlayComponent } from "../components/session-observer-overlay";
 import { SessionSelectorComponent } from "../components/session-selector";
 import { SettingsSelectorComponent } from "../components/settings-selector";
 import { ToolExecutionComponent } from "../components/tool-execution";
 import { TreeSelectorComponent } from "../components/tree-selector";
 import { UserMessageSelectorComponent } from "../components/user-message-selector";
+import type { SessionObserverRegistry } from "../session-observer-registry";
 
 const CALLBACK_SERVER_PROVIDERS = new Set<OAuthProvider>([
 	"anthropic",
@@ -565,31 +568,38 @@ export class SelectorController {
 				this.ctx.settings,
 				this.ctx.session.modelRegistry,
 				this.ctx.session.scopedModels,
-				async (model, role, thinkingLevel) => {
+				async (model, role, thinkingLevel, selector) => {
 					try {
 						if (role === null) {
 							// Temporary: update agent state but don't persist to settings
 							await this.ctx.session.setModelTemporary(model);
 							this.ctx.statusLine.invalidate();
 							this.ctx.updateEditorBorderColor();
-							this.ctx.showStatus(`Temporary model: ${model.id}`);
+							this.ctx.showStatus(`Temporary model: ${selector ?? model.id}`);
 							done();
 							this.ctx.ui.requestRender();
 						} else if (role === "default") {
 							// Default: update agent state and persist
-							await this.ctx.session.setModel(model, role);
+							await this.ctx.session.setModel(model, role, {
+								selector,
+								thinkingLevel,
+							});
 							if (thinkingLevel && thinkingLevel !== ThinkingLevel.Inherit) {
 								this.ctx.session.setThinkingLevel(thinkingLevel);
 							}
 							this.ctx.statusLine.invalidate();
 							this.ctx.updateEditorBorderColor();
-							this.ctx.showStatus(`Default model: ${model.id}`);
+							this.ctx.showStatus(`Default model: ${selector ?? model.id}`);
 							// Don't call done() - selector stays open for role assignment
 						} else {
 							// Other roles (smol, slow): just update settings, not current model
-							const roleInfo = MODEL_ROLES[role as ModelRole];
+							this.ctx.settings.setModelRole(
+								role,
+								formatModelSelectorValue(selector ?? `${model.provider}/${model.id}`, thinkingLevel),
+							);
+							const roleInfo = getRoleInfo(role, settings);
 							const roleLabel = roleInfo?.name ?? role;
-							this.ctx.showStatus(`${roleLabel} model: ${model.id}`);
+							this.ctx.showStatus(`${roleLabel} model: ${selector ?? model.id}`);
 							// Don't call done() - selector stays open
 						}
 					} catch (error) {
@@ -824,8 +834,9 @@ export class SelectorController {
 		const sessionManager = this.ctx.sessionManager as {
 			getSessionName?: () => string | undefined;
 			getCwd: () => string;
+			titleSource?: "auto" | "user" | undefined;
 		};
-		setSessionTerminalTitle(sessionManager.getSessionName?.(), sessionManager.getCwd());
+		setSessionTerminalTitle(sessionManager.getSessionName?.(), sessionManager.getCwd(), sessionManager.titleSource);
 	}
 
 	async #detachActiveSessionBeforeDeletion(sessionPath: string): Promise<boolean> {
@@ -844,6 +855,7 @@ export class SelectorController {
 		this.ctx.statusLine.invalidate();
 		this.ctx.statusLine.setSessionStartTime(Date.now());
 		this.ctx.updateEditorTopBorder();
+		this.ctx.updateEditorBorderColor();
 		this.ctx.renderInitialMessages();
 		await this.ctx.reloadTodos();
 		this.ctx.ui.requestRender();
@@ -856,6 +868,7 @@ export class SelectorController {
 		// Switch session via AgentSession (emits hook and tool session events)
 		await this.ctx.session.switchSession(sessionPath);
 		this.#refreshSessionTerminalTitle();
+		this.ctx.updateEditorBorderColor();
 
 		// Clear and re-render the chat
 		this.ctx.chatContainer.clear();
@@ -1046,6 +1059,30 @@ export class SelectorController {
 	showDebugSelector(): void {
 		this.showSelector(done => {
 			const selector = new DebugSelectorComponent(this.ctx, done);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	showSessionObserver(registry: SessionObserverRegistry): void {
+		const observeKeys = this.ctx.keybindings.getKeys("app.session.observe");
+
+		this.showSelector(done => {
+			let cleanup: (() => void) | undefined;
+
+			const selector = new SessionObserverOverlayComponent(
+				registry,
+				() => {
+					cleanup?.();
+					done();
+				},
+				observeKeys,
+			);
+
+			cleanup = registry.onChange(() => {
+				selector.refreshFromRegistry();
+				this.ctx.ui.requestRender();
+			});
+
 			return { component: selector, focus: selector };
 		});
 	}

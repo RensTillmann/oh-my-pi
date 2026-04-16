@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import { type AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { copyToClipboard, readImageFromClipboard, sanitizeText } from "@oh-my-pi/pi-natives";
+import { sanitizeText } from "@oh-my-pi/pi-natives";
 import type { AutocompleteProvider, SlashCommand } from "@oh-my-pi/pi-tui";
 import { $env } from "@oh-my-pi/pi-utils";
 import { settings } from "../../config/settings";
@@ -10,6 +10,7 @@ import type { InteractiveModeContext } from "../../modes/types";
 import type { AgentSessionEvent } from "../../session/agent-session";
 import { SKILL_PROMPT_MESSAGE_TYPE, type SkillPromptDetails } from "../../session/messages";
 import { executeBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
+import { copyToClipboard, readImageFromClipboard } from "../../utils/clipboard";
 import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { resizeImage } from "../../utils/image-resize";
 import { generateSessionTitle, setSessionTerminalTitle } from "../../utils/title-generator";
@@ -101,7 +102,7 @@ export class InputController {
 		this.ctx.editor.onPauseRender = enableRenderPause ? () => this.#handlePauseRender() : undefined;
 		this.ctx.editor.setActionKeys("app.render.resume", enableRenderPause ? resumeKeys : []);
 		this.ctx.editor.onResumeRender = enableRenderPause ? () => this.#handleResumeRender() : undefined;
-		this.ctx.editor.setActionKeys("app.thinking.cycleLevel", this.ctx.keybindings.getKeys("app.thinking.cycleLevel"));
+		this.ctx.editor.setActionKeys("app.thinking.cycle", this.ctx.keybindings.getKeys("app.thinking.cycle"));
 		this.ctx.editor.onCycleThinkingLevel = () => this.cycleThinkingLevel();
 		this.ctx.editor.setActionKeys("app.model.cycleForward", this.ctx.keybindings.getKeys("app.model.cycleForward"));
 		this.ctx.editor.onCycleModelForward = () => this.cycleRoleModel();
@@ -174,6 +175,9 @@ export class InputController {
 				this.ctx.session.backgroundBash?.();
 			});
 		}
+		for (const key of this.ctx.keybindings.getKeys("app.session.observe")) {
+			this.ctx.editor.setCustomKeyHandler(key, () => this.ctx.showSessionObserver());
+		}
 
 		this.ctx.editor.onChange = (text: string) => {
 			const wasBashMode = this.ctx.isBashMode;
@@ -231,13 +235,16 @@ export class InputController {
 			if (!text) return;
 
 			// Handle built-in slash commands
-			if (
-				await executeBuiltinSlashCommand(text, {
-					ctx: this.ctx,
-					handleBackgroundCommand: () => this.handleBackgroundCommand(),
-				})
-			) {
+			const slashResult = await executeBuiltinSlashCommand(text, {
+				ctx: this.ctx,
+				handleBackgroundCommand: () => this.handleBackgroundCommand(),
+			});
+			if (slashResult === true) {
 				return;
+			}
+			if (typeof slashResult === "string") {
+				// Command handled but returned remaining text to use as prompt
+				text = slashResult;
 			}
 
 			// Handle skill commands (/skill:name [args])
@@ -351,8 +358,15 @@ export class InputController {
 				generateSessionTitle(text, registry, this.ctx.settings, this.ctx.session.sessionId, this.ctx.session.model)
 					.then(async title => {
 						if (title) {
-							await this.ctx.sessionManager.setSessionName(title);
-							setSessionTerminalTitle(title, this.ctx.sessionManager.getCwd());
+							const applied = await this.ctx.sessionManager.setSessionName(title, "auto");
+							if (applied) {
+								setSessionTerminalTitle(
+									this.ctx.sessionManager.getSessionName()!,
+									this.ctx.sessionManager.getCwd(),
+									this.ctx.sessionManager.titleSource,
+								);
+								this.ctx.updateEditorBorderColor();
+							}
 						}
 					})
 					.catch(() => {});

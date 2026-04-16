@@ -1,18 +1,19 @@
 import * as path from "node:path";
 import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 
-import { type GrepMatch, type GrepResult, grep } from "@oh-my-pi/pi-natives";
+import { type GrepMatch, GrepOutputMode, type GrepResult, grep } from "@oh-my-pi/pi-natives";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
-import { untilAborted } from "@oh-my-pi/pi-utils";
+import { prompt, untilAborted } from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
-import { renderPromptTemplate } from "../config/prompt-templates";
+import { computeLineHash } from "../edit/line-hash";
+import { type ChunkedGrepMatch, describeChunkedGrepMatch } from "../edit/modes/chunk";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
-import type { Theme } from "../modes/theme/theme";
-import { computeLineHash } from "../patch/hashline";
+import { getLanguageFromPath, type Theme } from "../modes/theme/theme";
 import grepDescription from "../prompts/tools/grep.md" with { type: "text" };
 import { DEFAULT_MAX_COLUMN, type TruncationResult, truncateHead } from "../session/streaming-output";
 import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../tui";
+import { resolveEditMode } from "../utils/edit-mode";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import type { ToolSession } from ".";
 import { formatFullOutputReference, type OutputMeta } from "./output-meta";
@@ -72,9 +73,10 @@ export class GrepTool implements AgentTool<typeof grepSchema, GrepToolDetails> {
 
 	constructor(private readonly session: ToolSession) {
 		const displayMode = resolveFileDisplayMode(session);
-		this.description = renderPromptTemplate(grepDescription, {
+		this.description = prompt.render(grepDescription, {
 			IS_HASHLINE_MODE: displayMode.hashLines,
 			IS_LINE_NUMBER_MODE: !displayMode.hashLines && displayMode.lineNumbers,
+			IS_CHUNK_MODE: displayMode.chunked,
 		});
 	}
 
@@ -89,6 +91,7 @@ export class GrepTool implements AgentTool<typeof grepSchema, GrepToolDetails> {
 
 		return untilAborted(signal, async () => {
 			const normalizedPattern = pattern.trim();
+			const chunkMode = resolveEditMode(this.session) === "chunk";
 			if (!normalizedPattern) {
 				throw new ToolError("Pattern must not be empty");
 			}
@@ -159,10 +162,11 @@ export class GrepTool implements AgentTool<typeof grepSchema, GrepToolDetails> {
 				const stat = await Bun.file(searchPath).stat();
 				isDirectory = stat.isDirectory();
 			} catch {
-				throw new ToolError(`Path not found: ${scopePath}`);
+				const hint = scopePath.includes(",") ? ` (comma-separated paths must each exist relative to cwd)` : "";
+				throw new ToolError(`Path not found: ${scopePath}${hint}`);
 			}
 
-			const effectiveOutputMode = "content";
+			const effectiveOutputMode = GrepOutputMode.Content;
 			const effectiveLimit = normalizedLimit ?? DEFAULT_MATCH_LIMIT;
 			const internalLimit = Math.min(effectiveLimit * 5, 2000);
 
@@ -188,7 +192,6 @@ export class GrepTool implements AgentTool<typeof grepSchema, GrepToolDetails> {
 						mode: effectiveOutputMode,
 					},
 					undefined,
-					this.session.searchDb,
 				);
 			} catch (err) {
 				if (err instanceof Error && err.message.startsWith("regex parse error")) {
@@ -270,6 +273,119 @@ export class GrepTool implements AgentTool<typeof grepSchema, GrepToolDetails> {
 				}
 				matchesByFile.get(relativePath)!.push(match);
 			}
+			if (chunkMode) {
+				const annotatedMatches = await Promise.all(
+					selectedMatches.map(match => {
+						const relativePath = match.path.startsWith("/") ? match.path.slice(1) : match.path;
+						const absoluteFilePath = isDirectory ? path.join(searchPath, relativePath) : searchPath;
+						return describeChunkedGrepMatch({
+							filePath: absoluteFilePath,
+							lineNumber: match.lineNumber,
+							line: match.line,
+							cwd: this.session.cwd,
+							language: getLanguageFromPath(absoluteFilePath),
+						});
+					}),
+				);
+				const chunkMatchesByFile = new Map<string, ChunkedGrepMatch[]>();
+				for (const match of annotatedMatches) {
+					recordFile(match.displayPath);
+					if (!chunkMatchesByFile.has(match.displayPath)) {
+						chunkMatchesByFile.set(match.displayPath, []);
+					}
+					chunkMatchesByFile.get(match.displayPath)!.push(match);
+				}
+				const renderChunkedMatchesForFile = (relativePath: string) => {
+					const fileMatches = chunkMatchesByFile.get(relativePath) ?? [];
+					if (fileMatches.length === 0) {
+						return;
+					}
+					const lineWidth = fileMatches[0]?.fileLineCount.toString().length ?? 1;
+					const matchesByChunk = new Map<string, ChunkedGrepMatch[]>();
+					for (const match of fileMatches) {
+						const chunkKey = match.chunkPath ?? "";
+						if (!matchesByChunk.has(chunkKey)) {
+							matchesByChunk.set(chunkKey, []);
+						}
+						matchesByChunk.get(chunkKey)!.push(match);
+					}
+					for (const [chunkPath, chunkMatches] of matchesByChunk) {
+						if (chunkPath) {
+							const chunkChecksum = chunkMatches[0]?.chunkChecksum;
+							const dashes = "-".repeat(chunkPath.split(".").length - 1);
+							const anchor = chunkChecksum
+								? `${dashes}@${chunkPath}#${chunkChecksum}`
+								: `${dashes}@${chunkPath}`;
+							outputLines.push(anchor);
+						}
+						for (const match of chunkMatches) {
+							outputLines.push(`    ${match.lineNumber.toString().padStart(lineWidth, " ")} |${match.line}`);
+							fileMatchCounts.set(relativePath, (fileMatchCounts.get(relativePath) ?? 0) + 1);
+						}
+					}
+				};
+				if (isDirectory) {
+					const filesByDirectory = new Map<string, string[]>();
+					for (const relativePath of fileList) {
+						const directory = path.dirname(relativePath).replace(/\\/g, "/");
+						if (!filesByDirectory.has(directory)) {
+							filesByDirectory.set(directory, []);
+						}
+						filesByDirectory.get(directory)!.push(relativePath);
+					}
+					for (const [directory, directoryFiles] of filesByDirectory) {
+						if (directory === ".") {
+							for (const relativePath of directoryFiles) {
+								if (outputLines.length > 0) {
+									outputLines.push("");
+								}
+								outputLines.push(`# ${path.basename(relativePath)}`);
+								renderChunkedMatchesForFile(relativePath);
+							}
+							continue;
+						}
+						if (outputLines.length > 0) {
+							outputLines.push("");
+						}
+						outputLines.push(`# ${directory}`);
+						for (const relativePath of directoryFiles) {
+							outputLines.push(`## └─ ${path.basename(relativePath)}`);
+							renderChunkedMatchesForFile(relativePath);
+						}
+					}
+				} else {
+					for (const relativePath of fileList) {
+						renderChunkedMatchesForFile(relativePath);
+					}
+				}
+				const rawOutput = outputLines.join("\n");
+				const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+				const truncated = Boolean(matchLimitReached || result.limitReached || truncation.truncated);
+				const details: GrepToolDetails = {
+					scopePath,
+					matchCount: selectedMatches.length,
+					fileCount: fileList.length,
+					files: fileList,
+					fileMatches: fileList.map(path => ({
+						path,
+						count: fileMatchCounts.get(path) ?? 0,
+					})),
+					truncated,
+					matchLimitReached: matchLimitReached ? effectiveLimit : undefined,
+					resultLimitReached: result.limitReached ? internalLimit : undefined,
+				};
+				if (truncation.truncated) details.truncation = truncation;
+				const resultBuilder = toolResult(details)
+					.text(truncation.content)
+					.limits({
+						matchLimit: matchLimitReached ? effectiveLimit : undefined,
+						resultLimit: result.limitReached ? internalLimit : undefined,
+					});
+				if (truncation.truncated) {
+					resultBuilder.truncation(truncation, { direction: "head" });
+				}
+				return resultBuilder.done();
+			}
 			const renderMatchesForFile = (relativePath: string) => {
 				const fileMatches = matchesByFile.get(relativePath) ?? [];
 				for (const match of fileMatches) {
@@ -286,12 +402,13 @@ export class GrepTool implements AgentTool<typeof grepSchema, GrepToolDetails> {
 					}
 					const lineWidth = Math.max(...lineNumbers.map(value => value.toString().length));
 					const formatLine = (lineNumber: number, line: string, isMatch: boolean): string => {
+						const separator = isMatch ? ":" : "-";
 						if (useHashLines) {
 							const ref = `${lineNumber}#${computeLineHash(lineNumber, line)}`;
-							return isMatch ? `>>${ref}:${line}` : `  ${ref}:${line}`;
+							return `${ref}${separator}${line}`;
 						}
 						const padded = lineNumber.toString().padStart(lineWidth, " ");
-						return isMatch ? `>>${padded}:${line}` : `  ${padded}:${line}`;
+						return `${padded}${separator}${line}`;
 					};
 					if (match.contextBefore) {
 						for (const ctx of match.contextBefore) {

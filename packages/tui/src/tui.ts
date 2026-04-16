@@ -3,11 +3,11 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getCrashLogPath, getDebugLogPath } from "@oh-my-pi/pi-utils";
+import { $flag, getDebugLogPath } from "@oh-my-pi/pi-utils";
 import { isKeyRelease, matchesKey } from "./keys";
 import type { Terminal } from "./terminal";
 import { ImageProtocol, setCellDimensions, setTerminalImageProtocol, TERMINAL } from "./terminal-capabilities";
-import { extractSegments, sliceByColumn, sliceWithWidth, visibleWidth } from "./utils";
+import { Ellipsis, extractSegments, sliceByColumn, sliceWithWidth, truncateToWidth, visibleWidth } from "./utils";
 
 const SEGMENT_RESET = "\x1b[0m";
 
@@ -230,8 +230,8 @@ export class TUI extends Container {
 	#sixelProbeBuffer = "";
 	#sixelProbeTimeout?: NodeJS.Timeout;
 	#sixelProbeUnsubscribe?: () => void;
-	#showHardwareCursor = process.env.PI_HARDWARE_CURSOR === "1";
-	#clearOnShrink = process.env.PI_CLEAR_ON_SHRINK === "1"; // Clear empty rows when content shrinks (default: off)
+	#showHardwareCursor = $flag("PI_HARDWARE_CURSOR");
+	#clearOnShrink = $flag("PI_CLEAR_ON_SHRINK"); // Clear empty rows when content shrinks (default: off)
 	#maxLinesRendered = 0; // High-water line count used for clear-on-shrink policy
 	#fullRedrawCount = 0;
 	#stopped = false;
@@ -1065,7 +1065,7 @@ export class TUI extends Container {
 			this.#previousHeight = height;
 		};
 
-		const debugRedraw = process.env.PI_DEBUG_REDRAW === "1";
+		const debugRedraw = $flag("PI_DEBUG_REDRAW");
 		const logRedraw = (reason: string): void => {
 			if (!debugRedraw) return;
 			const logPath = getDebugLogPath();
@@ -1223,36 +1223,25 @@ export class TUI extends Container {
 			if (i > firstChanged) buffer += "\r\n";
 			buffer += "\x1b[2K"; // Clear current line
 			const line = newLines[i];
+			let truncatedLine = line;
 			const isImage = TERMINAL.isImageLine(line);
 			if (!isImage && visibleWidth(line) > width) {
-				// Log all lines to crash file for debugging
-				const crashLogPath = getCrashLogPath();
-				const crashData = [
-					`Crash at ${new Date().toISOString()}`,
-					`Terminal width: ${width}`,
-					`Line ${i} visible width: ${visibleWidth(line)}`,
-					"",
-					"=== All rendered lines ===",
-					...newLines.map((l, idx) => `[${idx}] (w=${visibleWidth(l)}) ${l}`),
-					"",
-				].join("\n");
-				fs.mkdirSync(path.dirname(crashLogPath), { recursive: true });
-				fs.writeFileSync(crashLogPath, crashData);
-
-				// Clean up terminal state before throwing
-				this.stop();
-
-				const errorMsg = [
-					`Rendered line ${i} exceeds terminal width (${visibleWidth(line)} > ${width}).`,
-					"",
-					"This is likely caused by a custom TUI component not truncating its output.",
-					"Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
-					"",
-					`Debug log written to: ${crashLogPath}`,
-				].join("\n");
-				throw new Error(errorMsg);
+				if (debugRedraw) {
+					const debugData = [
+						`[TUI Truncate] ${new Date().toISOString()}`,
+						`Line ${i} truncated: ${visibleWidth(line)} > ${width}`,
+						`Content preview: ${line.slice(0, 100)}...`,
+						"",
+					].join("\n");
+					try {
+						fs.appendFileSync(getDebugLogPath(), debugData);
+					} catch {
+						// Ignore write errors - truncation should still work
+					}
+				}
+				truncatedLine = truncateToWidth(line, width, Ellipsis.Omit);
 			}
-			buffer += isImage ? line : line + SEGMENT_RESET;
+			buffer += isImage ? truncatedLine : truncatedLine + SEGMENT_RESET;
 		}
 
 		// Track where cursor ended up after rendering
@@ -1276,7 +1265,7 @@ export class TUI extends Container {
 
 		buffer += "\x1b[?2026l"; // End synchronized output
 
-		if (process.env.PI_TUI_DEBUG === "1") {
+		if ($flag("PI_TUI_DEBUG")) {
 			const debugDir = "/tmp/tui";
 			fs.mkdirSync(debugDir, { recursive: true });
 			const debugPath = path.join(debugDir, `render-${Date.now()}-${Math.random().toString(36).slice(2)}.log`);

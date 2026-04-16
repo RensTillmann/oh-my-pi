@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "../extensibility/extensions";
+import * as git from "../utils/git";
 import { isAutoresearchLocalStatePath, normalizeAutoresearchPath } from "./helpers";
 
 const AUTORESEARCH_BRANCH_PREFIX = "autoresearch/";
@@ -17,9 +18,8 @@ export interface EnsureAutoresearchBranchSuccess {
 
 export type EnsureAutoresearchBranchResult = EnsureAutoresearchBranchFailure | EnsureAutoresearchBranchSuccess;
 
-export async function getCurrentAutoresearchBranch(api: ExtensionAPI, workDir: string): Promise<string | null> {
-	const currentBranchResult = await api.exec("git", ["branch", "--show-current"], { cwd: workDir, timeout: 5_000 });
-	const currentBranch = currentBranchResult.stdout.trim();
+export async function getCurrentAutoresearchBranch(_api: ExtensionAPI, workDir: string): Promise<string | null> {
+	const currentBranch = (await git.branch.current(workDir)) ?? "";
 	return currentBranch.startsWith(AUTORESEARCH_BRANCH_PREFIX) ? currentBranch : null;
 }
 
@@ -28,28 +28,30 @@ export async function ensureAutoresearchBranch(
 	workDir: string,
 	goal: string | null,
 ): Promise<EnsureAutoresearchBranchResult> {
-	const repoRootResult = await api.exec("git", ["rev-parse", "--show-toplevel"], { cwd: workDir, timeout: 5_000 });
-	if (repoRootResult.code !== 0) {
+	const repoRoot = await git.repo.root(workDir);
+	if (!repoRoot) {
 		return {
 			error: "Autoresearch requires a git repository so it can isolate experiments and revert failed runs safely.",
 			ok: false,
 		};
 	}
-	const repoRoot = repoRootResult.stdout.trim() || workDir;
 
-	const dirtyPathsResult = await api.exec("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
-		cwd: repoRoot,
-		timeout: 5_000,
-	});
-	if (dirtyPathsResult.code !== 0) {
+	let dirtyPathsOutput: string;
+	try {
+		dirtyPathsOutput = await git.status(repoRoot, {
+			porcelainV1: true,
+			untrackedFiles: "all",
+			z: true,
+		});
+	} catch (err) {
 		return {
-			error: `Unable to inspect git status before starting autoresearch: ${mergeStdoutStderr(dirtyPathsResult).trim() || `exit ${dirtyPathsResult.code}`}`,
+			error: `Unable to inspect git status before starting autoresearch: ${err instanceof Error ? err.message : String(err)}`,
 			ok: false,
 		};
 	}
 
 	const workDirPrefix = await readGitWorkDirPrefix(api, workDir);
-	const unsafeDirtyPaths = collectUnsafeDirtyPaths(dirtyPathsResult.stdout, workDirPrefix);
+	const unsafeDirtyPaths = collectUnsafeDirtyPaths(dirtyPathsOutput, workDirPrefix);
 	const currentBranch = await getCurrentAutoresearchBranch(api, workDir);
 	if (currentBranch) {
 		if (unsafeDirtyPaths.length > 0) {
@@ -66,12 +68,11 @@ export async function ensureAutoresearchBranch(
 	}
 
 	const branchName = await allocateBranchName(api, workDir, goal);
-	const checkoutResult = await api.exec("git", ["checkout", "-b", branchName], { cwd: workDir, timeout: 10_000 });
-	if (checkoutResult.code !== 0) {
+	try {
+		await git.branch.checkoutNew(workDir, branchName);
+	} catch (err) {
 		return {
-			error:
-				`Failed to create autoresearch branch ${branchName}: ` +
-				`${mergeStdoutStderr(checkoutResult).trim() || `exit ${checkoutResult.code}`}`,
+			error: `Failed to create autoresearch branch ${branchName}: ${err instanceof Error ? err.message : String(err)}`,
 			ok: false,
 		};
 	}
@@ -109,11 +110,12 @@ export function relativizeGitPathToWorkDir(repoRelativePath: string, workDirPref
 }
 
 async function readGitWorkDirPrefix(api: ExtensionAPI, workDir: string): Promise<string> {
-	const prefixResult = await api.exec("git", ["rev-parse", "--show-prefix"], { cwd: workDir, timeout: 5_000 });
-	if (prefixResult.code !== 0) {
+	void api;
+	try {
+		return await git.show.prefix(workDir);
+	} catch {
 		return "";
 	}
-	return prefixResult.stdout.trim();
 }
 
 export function parseDirtyPaths(statusOutput: string): string[] {
@@ -180,11 +182,8 @@ async function allocateBranchName(api: ExtensionAPI, workDir: string, goal: stri
 }
 
 async function branchExists(api: ExtensionAPI, workDir: string, branchName: string): Promise<boolean> {
-	const result = await api.exec("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`], {
-		cwd: workDir,
-		timeout: 5_000,
-	});
-	return result.code === 0;
+	void api;
+	return git.ref.exists(workDir, `refs/heads/${branchName}`);
 }
 
 function slugifyGoal(goal: string | null): string {
@@ -202,10 +201,6 @@ function currentDateStamp(): string {
 	const month = String(now.getMonth() + 1).padStart(2, "0");
 	const day = String(now.getDate()).padStart(2, "0");
 	return `${year}${month}${day}`;
-}
-
-function mergeStdoutStderr(result: { stderr: string; stdout: string }): string {
-	return `${result.stdout}${result.stderr}`;
 }
 
 function addDirtyPath(paths: Set<string>, rawPath: string): void {
@@ -240,4 +235,95 @@ function collectUnsafeDirtyPaths(statusOutput: string, workDirPrefix: string): s
 		unsafeDirtyPaths.push(relativePath ?? normalizeStatusPath(dirtyPath));
 	}
 	return unsafeDirtyPaths;
+}
+
+export interface DirtyPathEntry {
+	path: string;
+	untracked: boolean;
+}
+
+export function parseDirtyPathsWithStatus(statusOutput: string): DirtyPathEntry[] {
+	if (statusOutput.includes("\0")) {
+		return parseDirtyPathsNulWithStatus(statusOutput);
+	}
+	return parseDirtyPathsLinesWithStatus(statusOutput);
+}
+
+function parseDirtyPathsNulWithStatus(statusOutput: string): DirtyPathEntry[] {
+	const seen = new Set<string>();
+	const results: DirtyPathEntry[] = [];
+	let index = 0;
+	while (index + 3 <= statusOutput.length) {
+		const statusToken = statusOutput.slice(index, index + 3);
+		index += 3;
+		const pathEnd = statusOutput.indexOf("\0", index);
+		if (pathEnd < 0) break;
+		const firstPath = statusOutput.slice(index, pathEnd);
+		index = pathEnd + 1;
+		const untracked = statusToken.trim().startsWith("??");
+		addDirtyPathEntry(seen, results, firstPath, untracked);
+		if (isRenameOrCopy(statusToken)) {
+			const secondPathEnd = statusOutput.indexOf("\0", index);
+			if (secondPathEnd < 0) break;
+			const secondPath = statusOutput.slice(index, secondPathEnd);
+			index = secondPathEnd + 1;
+			addDirtyPathEntry(seen, results, secondPath, false);
+		}
+	}
+	return results;
+}
+
+function parseDirtyPathsLinesWithStatus(statusOutput: string): DirtyPathEntry[] {
+	const seen = new Set<string>();
+	const results: DirtyPathEntry[] = [];
+	for (const line of statusOutput.split("\n")) {
+		const trimmedLine = line.trimEnd();
+		if (trimmedLine.length < 4) continue;
+		const statusToken = trimmedLine.slice(0, 3);
+		const rawPath = trimmedLine.slice(3).trim();
+		if (rawPath.length === 0) continue;
+		const untracked = statusToken.trim().startsWith("??");
+		const renameParts = rawPath.split(" -> ");
+		for (const renamePart of renameParts) {
+			addDirtyPathEntry(seen, results, renamePart, untracked);
+		}
+	}
+	return results;
+}
+
+function addDirtyPathEntry(seen: Set<string>, results: DirtyPathEntry[], rawPath: string, untracked: boolean): void {
+	const normalizedPath = normalizeStatusPath(rawPath);
+	if (normalizedPath.length === 0 || seen.has(normalizedPath)) return;
+	seen.add(normalizedPath);
+	results.push({ path: normalizedPath, untracked });
+}
+
+export function parseWorkDirDirtyPathsWithStatus(statusOutput: string, workDirPrefix: string): DirtyPathEntry[] {
+	const results: DirtyPathEntry[] = [];
+	for (const entry of parseDirtyPathsWithStatus(statusOutput)) {
+		const relativePath = relativizeGitPathToWorkDir(entry.path, workDirPrefix);
+		if (relativePath === null) continue;
+		results.push({ path: relativePath, untracked: entry.untracked });
+	}
+	return results;
+}
+
+export function computeRunModifiedPaths(
+	preRunDirtyPaths: string[],
+	currentStatusOutput: string,
+	workDirPrefix: string,
+): { tracked: string[]; untracked: string[] } {
+	const preRunSet = new Set(preRunDirtyPaths);
+	const tracked: string[] = [];
+	const untracked: string[] = [];
+	for (const entry of parseWorkDirDirtyPathsWithStatus(currentStatusOutput, workDirPrefix)) {
+		if (preRunSet.has(entry.path)) continue;
+		if (isAutoresearchLocalStatePath(entry.path)) continue;
+		if (entry.untracked) {
+			untracked.push(entry.path);
+		} else {
+			tracked.push(entry.path);
+		}
+	}
+	return { tracked, untracked };
 }

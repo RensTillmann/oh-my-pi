@@ -3,7 +3,6 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
-import type { SearchDb } from "@oh-my-pi/pi-natives";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../../config/model-registry";
@@ -161,7 +160,6 @@ export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
 	#errorListeners: Set<ExtensionErrorListener> = new Set();
 	#getModel: () => Model | undefined = () => undefined;
-	#getSearchDbFn: () => SearchDb | undefined = () => undefined;
 	#isIdleFn: () => boolean = () => true;
 	#waitForIdleFn: () => Promise<void> = async () => {};
 	#abortFn: () => void = () => {};
@@ -204,10 +202,11 @@ export class ExtensionRunner {
 		this.runtime.setModel = actions.setModel;
 		this.runtime.getThinkingLevel = actions.getThinkingLevel;
 		this.runtime.setThinkingLevel = actions.setThinkingLevel;
+		this.runtime.getSessionName = actions.getSessionName;
+		this.runtime.setSessionName = actions.setSessionName;
 
 		// Context actions (required)
 		this.#getModel = contextActions.getModel;
-		this.#getSearchDbFn = contextActions.getSearchDb ?? (() => undefined);
 		this.#isIdleFn = contextActions.isIdle;
 		this.#abortFn = contextActions.abort;
 		this.#hasPendingMessagesFn = contextActions.hasPendingMessages;
@@ -260,6 +259,10 @@ export class ExtensionRunner {
 			}
 		}
 		return allFlags;
+	}
+
+	getFlagValues(): Map<string, boolean | string> {
+		return new Map(this.runtime.flagValues);
 	}
 
 	setFlagValue(name: string, value: boolean | string): void {
@@ -379,7 +382,6 @@ export class ExtensionRunner {
 
 	createContext(): ExtensionContext {
 		const getModel = this.#getModel;
-		const getSearchDb = this.#getSearchDbFn;
 		return {
 			ui: this.#uiContext,
 			getContextUsage: () => this.#getContextUsageFn(),
@@ -390,9 +392,6 @@ export class ExtensionRunner {
 			modelRegistry: this.modelRegistry,
 			get model() {
 				return getModel();
-			},
-			get searchDb() {
-				return getSearchDb();
 			},
 			isIdle: () => this.#isIdleFn(),
 			abort: () => this.#abortFn(),
@@ -695,7 +694,26 @@ export class ExtensionRunner {
 
 	async emitContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
 		const ctx = this.createContext();
-		let currentMessages = structuredClone(messages);
+
+		// Check if any extensions actually have context handlers before cloning
+		let hasContextHandlers = false;
+		for (const ext of this.extensions) {
+			if (ext.handlers.get("context")?.length) {
+				hasContextHandlers = true;
+				break;
+			}
+		}
+		if (!hasContextHandlers) return messages;
+
+		let currentMessages: AgentMessage[];
+		try {
+			currentMessages = structuredClone(messages);
+		} catch {
+			// Messages may contain non-cloneable objects (e.g. in ToolResultMessage.details
+			// or ProviderPayload). Fall back to a shallow array clone — extensions should
+			// return new message arrays rather than mutating in place.
+			currentMessages = [...messages];
+		}
 
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get("context");

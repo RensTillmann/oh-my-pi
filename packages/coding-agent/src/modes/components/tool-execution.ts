@@ -14,9 +14,9 @@ import {
 	type TUI,
 } from "@oh-my-pi/pi-tui";
 import { getProjectDir, logger } from "@oh-my-pi/pi-utils";
+import { computeEditDiff, computeHashlineDiff, computePatchDiff, type DiffError, type DiffResult } from "../../edit";
 import type { Theme } from "../../modes/theme/theme";
 import { theme } from "../../modes/theme/theme";
-import { computeEditDiff, computeHashlineDiff, computePatchDiff, type DiffError, type DiffResult } from "../../patch";
 import { BASH_DEFAULT_PREVIEW_LINES } from "../../tools/bash";
 import {
 	formatArgsInline,
@@ -81,6 +81,7 @@ export interface ToolExecutionHandle {
 export class ToolExecutionComponent extends Container {
 	#contentBox: Box; // Used for custom tools and bash visual truncation
 	#contentText: Text; // For built-in tools (with its own padding/bg)
+	#multiFileBoxes: (Box | Spacer)[] = []; // Extra boxes for multi-file edit results
 	#imageComponents: Image[] = [];
 	#imageSpacers: Spacer[] = [];
 	#toolName: string;
@@ -126,17 +127,18 @@ export class ToolExecutionComponent extends Container {
 		tool: AgentTool | undefined,
 		ui: TUI,
 		cwd: string = getProjectDir(),
+		_toolCallId?: string,
 	) {
 		super();
 		this.#toolName = toolName;
 		this.#toolLabel = tool?.label ?? toolName;
-		this.#args = cloneToolArgs(args);
 		this.#showImages = options.showImages ?? true;
 		this.#editFuzzyThreshold = options.editFuzzyThreshold;
 		this.#editAllowFuzzy = options.editAllowFuzzy;
 		this.#tool = tool;
 		this.#ui = ui;
 		this.#cwd = cwd;
+		this.#args = cloneToolArgs(args);
 
 		this.addChild(new Spacer(1));
 
@@ -179,12 +181,32 @@ export class ToolExecutionComponent extends Container {
 	#maybeComputeEditDiff(): void {
 		if (this.#toolName !== "edit") return;
 
-		const path = this.#args?.path;
-		const op = this.#args?.op;
+		const edits = this.#args?.edits;
+		if (!Array.isArray(edits) || edits.length === 0) return;
 
-		if (op) {
-			const diff = this.#args?.diff;
-			const rename = this.#args?.rename;
+		const first = edits[0];
+		if (!first || typeof first !== "object") return;
+
+		// Detect mode from first edit entry shape and compute preview for first file
+		if ("old_text" in first && "new_text" in first) {
+			// Replace mode
+			const { path, old_text: oldText, new_text: newText, all } = first;
+			if (!path || oldText === undefined || newText === undefined) return;
+
+			const argsKey = JSON.stringify({ path, oldText, newText, all });
+			if (this.#editDiffArgsKey === argsKey) return;
+			this.#editDiffArgsKey = argsKey;
+
+			computeEditDiff(path, oldText, newText, this.#cwd, true, all, this.#editFuzzyThreshold).then(result => {
+				if (this.#editDiffArgsKey === argsKey) {
+					this.#editDiffPreview = result;
+					this.#updateDisplay();
+					this.#ui.requestRender();
+				}
+			});
+		} else if ("path" in first && ("diff" in first || ("op" in first && !("content" in first)))) {
+			// Patch mode (has diff or op without content — chunk edits always have content)
+			const { path, op, rename, diff } = first;
 			if (!path) return;
 
 			const argsKey = JSON.stringify({ path, op, rename, diff });
@@ -201,49 +223,26 @@ export class ToolExecutionComponent extends Container {
 					this.#ui.requestRender();
 				}
 			});
-			return;
-		}
-		const edits = this.#args?.edits;
-		const move = this.#args?.move;
-		if (path && Array.isArray(edits)) {
-			const argsKey = JSON.stringify({ path, edits, move });
+		} else if ("loc" in first && "path" in first) {
+			// Hashline mode — group edits by path, preview first file
+			const path = first.path;
+			if (!path) return;
+			const fileEdits = edits.filter((e: any) => e.path === path);
+			const move = this.#args?.move;
+
+			const argsKey = JSON.stringify({ path, edits: fileEdits, move });
 			if (this.#editDiffArgsKey === argsKey) return;
 			this.#editDiffArgsKey = argsKey;
 
-			computeHashlineDiff({ path, edits, move }, this.#cwd).then(result => {
+			computeHashlineDiff({ path, edits: fileEdits, move }, this.#cwd).then(result => {
 				if (this.#editDiffArgsKey === argsKey) {
 					this.#editDiffPreview = result;
 					this.#updateDisplay();
 					this.#ui.requestRender();
 				}
 			});
-			return;
 		}
-
-		const oldText = this.#args?.old_text;
-		const newText = this.#args?.new_text;
-		const all = this.#args?.all;
-
-		// Need all three params to compute diff
-		if (!path || oldText === undefined || newText === undefined) return;
-
-		// Create a key to track which args this computation is for
-		const argsKey = JSON.stringify({ path, oldText, newText, all });
-
-		// Skip if we already computed for these exact args
-		if (this.#editDiffArgsKey === argsKey) return;
-
-		this.#editDiffArgsKey = argsKey;
-
-		// Compute diff async
-		computeEditDiff(path, oldText, newText, this.#cwd, true, all, this.#editFuzzyThreshold).then(result => {
-			// Only update if args haven't changed since we started
-			if (this.#editDiffArgsKey === argsKey) {
-				this.#editDiffPreview = result;
-				this.#updateDisplay();
-				this.#ui.requestRender();
-			}
-		});
+		// Chunk mode edits don't have a pre-execution diff preview
 	}
 
 	updateResult(
@@ -443,51 +442,122 @@ export class ToolExecutionComponent extends Container {
 		} else if (this.#toolName in toolRenderers) {
 			// Built-in tools with renderers
 			const renderer = toolRenderers[this.#toolName];
-			// Inline renderers skip background styling
-			this.#contentBox.setBgFn(renderer.inline ? undefined : bgFn);
-			this.#contentBox.clear();
 
-			const shouldRenderCall = !this.#result || !renderer.mergeCallAndResult;
-			if (shouldRenderCall) {
-				// Render call component
-				try {
-					const callComponent = renderer.renderCall(this.#getCallArgsForRender(), this.#renderState, theme);
-					if (callComponent) {
-						this.#contentBox.addChild(ensureInvalidate(callComponent));
-					}
-				} catch (err) {
-					logger.warn("Tool renderer failed", { tool: this.#toolName, error: String(err) });
-					// Fall back to default on error
-					this.#contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.#toolLabel)), 0, 0));
-				}
+			// Clean up previous multi-file boxes
+			for (const box of this.#multiFileBoxes) {
+				this.removeChild(box);
 			}
+			this.#multiFileBoxes = [];
 
-			// Render result component if we have a result
-			if (this.#result) {
-				try {
-					// Build render context for tools that need extra state
-					const renderContext = this.#buildRenderContext();
-					this.#renderState.renderContext = renderContext;
+			// Check for multi-file edit results
+			const perFileResults = this.#result?.details?.perFileResults as
+				| Array<{ path: string; isError?: boolean }>
+				| undefined;
+			if (perFileResults && perFileResults.length > 1) {
+				// Multi-file: render each file as its own Box (identical to separate tool calls)
+				this.#contentBox.setBgFn(undefined);
+				this.#contentBox.clear();
 
-					const resultComponent = renderer.renderResult(
-						{
-							content: this.#result.content as any,
-							details: this.#result.details,
-							isError: this.#result.isError,
-						},
-						this.#renderState,
-						theme,
-						this.#getCallArgsForRender(),
-					);
-					if (resultComponent) {
-						this.#contentBox.addChild(ensureInvalidate(resultComponent));
+				const renderContext = this.#buildRenderContext();
+				this.#renderState.renderContext = renderContext;
+
+				for (let i = 0; i < perFileResults.length; i++) {
+					const fileResult = perFileResults[i];
+					if (i > 0) {
+						const spacer = new Spacer(1);
+						this.#multiFileBoxes.push(spacer);
+						this.addChild(spacer);
 					}
-				} catch (err) {
-					logger.warn("Tool renderer failed", { tool: this.#toolName, error: String(err) });
-					// Fall back to showing raw output on error
-					const output = this.#getTextOutput();
-					if (output) {
-						this.#contentBox.addChild(new Text(theme.fg("toolOutput", replaceTabs(output)), 0, 0));
+					const fileBgFn = fileResult.isError
+						? (text: string) => theme.bg("toolErrorBg", text)
+						: (text: string) => theme.bg("toolSuccessBg", text);
+					const fileBox = new Box(1, 1, fileBgFn);
+					try {
+						const resultComponent = renderer.renderResult(
+							{ content: [], details: fileResult, isError: fileResult.isError },
+							this.#renderState,
+							theme,
+						);
+						if (resultComponent) {
+							fileBox.addChild(ensureInvalidate(resultComponent));
+						}
+					} catch (err) {
+						logger.warn("Tool renderer failed", { tool: this.#toolName, error: String(err) });
+					}
+					this.#multiFileBoxes.push(fileBox);
+					this.addChild(fileBox);
+				}
+
+				// Show pending indicator for remaining files
+				const totalFiles = this.#args?.edits
+					? new Set((this.#args.edits as any[]).map((e: any) => e?.path).filter(Boolean)).size
+					: 0;
+				const remaining = Math.max(0, totalFiles - perFileResults.length);
+				if (remaining > 0 && this.#isPartial) {
+					const pendingSpacer = new Spacer(1);
+					this.#multiFileBoxes.push(pendingSpacer);
+					this.addChild(pendingSpacer);
+					const pendingBox = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
+					const pendingText = renderStatusLine(
+						{
+							icon: "pending",
+							title: "Edit",
+							description: theme.fg("dim", `${remaining} more file${remaining > 1 ? "s" : ""} pending…`),
+						},
+						theme,
+					);
+					pendingBox.addChild(new Text(pendingText, 0, 0));
+					this.#multiFileBoxes.push(pendingBox);
+					this.addChild(pendingBox);
+				}
+			} else {
+				// Single-file or no result: standard rendering
+				// Inline renderers skip background styling
+				this.#contentBox.setBgFn(renderer.inline ? undefined : bgFn);
+				this.#contentBox.clear();
+
+				const shouldRenderCall = !this.#result || !renderer.mergeCallAndResult;
+				if (shouldRenderCall) {
+					// Render call component
+					try {
+						const callComponent = renderer.renderCall(this.#getCallArgsForRender(), this.#renderState, theme);
+						if (callComponent) {
+							this.#contentBox.addChild(ensureInvalidate(callComponent));
+						}
+					} catch (err) {
+						logger.warn("Tool renderer failed", { tool: this.#toolName, error: String(err) });
+						// Fall back to default on error
+						this.#contentBox.addChild(new Text(theme.fg("toolTitle", theme.bold(this.#toolLabel)), 0, 0));
+					}
+				}
+
+				// Render result component if we have a result
+				if (this.#result) {
+					try {
+						// Build render context for tools that need extra state
+						const renderContext = this.#buildRenderContext();
+						this.#renderState.renderContext = renderContext;
+
+						const resultComponent = renderer.renderResult(
+							{
+								content: this.#result.content as any,
+								details: this.#result.details,
+								isError: this.#result.isError,
+							},
+							this.#renderState,
+							theme,
+							this.#getCallArgsForRender(),
+						);
+						if (resultComponent) {
+							this.#contentBox.addChild(ensureInvalidate(resultComponent));
+						}
+					} catch (err) {
+						logger.warn("Tool renderer failed", { tool: this.#toolName, error: String(err) });
+						// Fall back to showing raw output on error
+						const output = this.#getTextOutput();
+						if (output) {
+							this.#contentBox.addChild(new Text(theme.fg("toolOutput", replaceTabs(output)), 0, 0));
+						}
 					}
 				}
 			}

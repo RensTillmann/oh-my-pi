@@ -7,7 +7,7 @@ import {
 	computeHashlineDiff,
 	DEFAULT_FUZZY_THRESHOLD,
 	findMatch,
-} from "@oh-my-pi/pi-coding-agent/patch";
+} from "@oh-my-pi/pi-coding-agent/edit";
 
 describe("findMatch", () => {
 	describe("exact matching", () => {
@@ -237,6 +237,20 @@ describe("computeHashlineDiff", () => {
 		expect("error" in result).toBe(true);
 		if ("error" in result) {
 			expect(result.error).toContain("No changes would be made");
+		}
+	});
+
+	test("accepts hashline tool edits without resolved op/lines", async () => {
+		const sourcePath = path.join(tempDir, "source.txt");
+		await Bun.write(sourcePath, "first\n");
+
+		const result = await computeHashlineDiff(
+			{ path: sourcePath, edits: [{ path: sourcePath, loc: "append", content: "second" }] },
+			tempDir,
+		);
+		expect("diff" in result).toBe(true);
+		if ("diff" in result) {
+			expect(result.diff).toContain("second");
 		}
 	});
 

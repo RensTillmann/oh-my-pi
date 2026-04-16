@@ -8,7 +8,7 @@
  */
 import { Container, Editor, matchesKey, Spacer, Text, type TUI } from "@oh-my-pi/pi-tui";
 import { getEditorTheme, theme } from "../../modes/theme/theme";
-import { matchesAppInterrupt } from "../../modes/utils/keybinding-matchers";
+import { matchesAppExternalEditor, matchesAppInterrupt } from "../../modes/utils/keybinding-matchers";
 import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { DynamicBorder } from "./dynamic-border";
 
@@ -85,7 +85,7 @@ export class HookEditorComponent extends Container {
 		}
 
 		// Ctrl+G for external editor
-		if (matchesKey(keyData, "ctrl+g")) {
+		if (matchesAppExternalEditor(keyData)) {
 			void this.#openExternalEditor();
 			return;
 		}
@@ -121,7 +121,7 @@ export class HookEditorComponent extends Container {
 		}
 
 		// Ctrl+G for external editor
-		if (matchesKey(keyData, "ctrl+g")) {
+		if (matchesAppExternalEditor(keyData)) {
 			void this.#openExternalEditor();
 			return;
 		}

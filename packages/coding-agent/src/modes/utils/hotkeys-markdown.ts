@@ -1,10 +1,10 @@
-import type { AppAction, KeybindingsManager } from "../../config/keybindings";
+import type { AppKeybinding, KeybindingsManager } from "../../config/keybindings";
 
 export interface HotkeysMarkdownBindings {
 	keybindings: Pick<KeybindingsManager, "getDisplayString">;
 }
 
-function appKey(bindings: HotkeysMarkdownBindings, action: AppAction): string {
+function appKey(bindings: HotkeysMarkdownBindings, action: AppKeybinding): string {
 	return bindings.keybindings.getDisplayString(action) || "Disabled";
 }
 
@@ -37,9 +37,7 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		`| \`${appKey(bindings, "app.clear")}\` | Clear editor (first) / exit (second) |`,
 		`| \`${appKey(bindings, "app.exit")}\` | Exit (when editor is empty) |`,
 		`| \`${appKey(bindings, "app.suspend")}\` | Suspend to background |`,
-		`| \`${appKey(bindings, "app.render.pause")}\` | Pause UI rendering (Termux only) |`,
-		`| \`${appKey(bindings, "app.render.resume")}\` | Resume UI rendering (Termux only) |`,
-		`| \`${appKey(bindings, "app.thinking.cycleLevel")}\` | Cycle thinking level |`,
+		`| \`${appKey(bindings, "app.thinking.cycle")}\` | Cycle thinking level |`,
 		`| \`${appKey(bindings, "app.model.cycleForward")}\` | Cycle role models (slow/default/smol) |`,
 		`| \`${appKey(bindings, "app.model.cycleBackward")}\` | Cycle role models (temporary) |`,
 		`| \`${appKey(bindings, "app.model.selectTemporary")}\` | Select model (temporary) |`,

@@ -5,13 +5,12 @@
  */
 import path from "node:path";
 import type { AgentEvent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { SearchDb } from "@oh-my-pi/pi-natives";
-import { logger, untilAborted } from "@oh-my-pi/pi-utils";
+import { logger, prompt, untilAborted } from "@oh-my-pi/pi-utils";
 import type { TSchema } from "@sinclair/typebox";
 import Ajv, { type ValidateFunction } from "ajv";
 import { ModelRegistry } from "../config/model-registry";
 import { resolveModelOverride } from "../config/model-resolver";
-import { type PromptTemplate, renderPromptTemplate } from "../config/prompt-templates";
+import type { PromptTemplate } from "../config/prompt-templates";
 import { Settings } from "../config/settings";
 import { SETTINGS_SCHEMA, type SettingPath } from "../config/settings-schema";
 import type { CustomTool } from "../extensibility/custom-tools/types";
@@ -38,6 +37,7 @@ import {
 	type ReviewFinding,
 	type SingleResult,
 	TASK_SUBAGENT_EVENT_CHANNEL,
+	TASK_SUBAGENT_LIFECYCLE_CHANNEL,
 	TASK_SUBAGENT_PROGRESS_CHANNEL,
 } from "./types";
 
@@ -148,7 +148,6 @@ export interface ExecutorOptions {
 	mcpManager?: MCPManager;
 	authStorage?: AuthStorage;
 	modelRegistry?: ModelRegistry;
-	searchDb?: SearchDb;
 	settings?: Settings;
 }
 
@@ -434,7 +433,11 @@ function createSubagentSettings(baseSettings: Settings): Settings {
 	for (const key of Object.keys(SETTINGS_SCHEMA) as SettingPath[]) {
 		snapshot[key] = baseSettings.get(key);
 	}
-	return Settings.isolated({ ...snapshot, "async.enabled": false });
+	return Settings.isolated({
+		...snapshot,
+		"async.enabled": false,
+		"bash.autoBackground.enabled": false,
+	});
 }
 
 /**
@@ -630,6 +633,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				task,
 				assignment,
 				progress: { ...progress },
+				sessionFile: subtaskSessionFile,
 			});
 		}
 		lastProgressEmitMs = Date.now();
@@ -952,7 +956,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				cwd: worktree ?? cwd,
 				authStorage,
 				modelRegistry,
-				searchDb: options.searchDb,
 				settings: subagentSettings,
 				model,
 				thinkingLevel: effectiveThinkingLevel,
@@ -963,7 +966,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				skills: options.skills,
 				promptTemplates: options.promptTemplates,
 				systemPrompt: defaultPrompt =>
-					renderPromptTemplate(subagentSystemPromptTemplate, {
+					prompt.render(subagentSystemPromptTemplate, {
 						base: defaultPrompt,
 						agent: agent.systemPrompt,
 						worktree: worktree ?? "",
@@ -982,6 +985,19 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			});
 
 			activeSession = session;
+
+			// Emit lifecycle start event
+			if (options.eventBus) {
+				options.eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, {
+					id,
+					agent: agent.name,
+					agentSource: agent.source,
+					description: options.description,
+					status: "started",
+					sessionFile: subtaskSessionFile,
+					index,
+				});
+			}
 
 			const subagentToolNames = session.getActiveToolNames();
 			const parentOwnedToolNames = new Set(["todo_write"]);
@@ -1042,10 +1058,13 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						},
 						getThinkingLevel: () => session.thinkingLevel,
 						setThinkingLevel: level => session.setThinkingLevel(level),
+						getSessionName: () => session.sessionManager.getSessionName(),
+						setSessionName: async name => {
+							await session.sessionManager.setSessionName(name, "user");
+						},
 					},
 					{
 						getModel: () => session.model,
-						getSearchDb: () => session.searchDb,
 						isIdle: () => !session.isStreaming,
 						abort: () => session.abort(),
 						hasPendingMessages: () => session.queuedMessageCount > 0,
@@ -1091,7 +1110,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			while (!submitResultCalled && retryCount < MAX_SUBMIT_RESULT_RETRIES && !abortSignal.aborted) {
 				try {
 					retryCount++;
-					const reminder = renderPromptTemplate(submitReminderTemplate, {
+					const reminder = prompt.render(submitReminderTemplate, {
 						retryCount,
 						maxRetries: MAX_SUBMIT_RESULT_RETRIES,
 					});
@@ -1237,6 +1256,19 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		: undefined;
 	progress.status = wasAborted ? "aborted" : exitCode === 0 ? "completed" : "failed";
 	scheduleProgress(true);
+
+	// Emit lifecycle end event after finalization so submit_result status is reflected
+	if (options.eventBus) {
+		options.eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, {
+			id,
+			agent: agent.name,
+			agentSource: agent.source,
+			description: options.description,
+			status: progress.status as "completed" | "failed" | "aborted",
+			sessionFile: subtaskSessionFile,
+			index,
+		});
+	}
 
 	return {
 		index,

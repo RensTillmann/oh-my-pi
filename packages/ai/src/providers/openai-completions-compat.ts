@@ -1,18 +1,21 @@
 import type { Model, OpenAICompat } from "../types";
 
 type OpenAIReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+type ResolvedToolStrictMode = NonNullable<OpenAICompat["toolStrictMode"]> | "mixed";
 
 export type ResolvedOpenAICompat = Required<
-	Omit<OpenAICompat, "openRouterRouting" | "vercelGatewayRouting" | "extraBody">
+	Omit<OpenAICompat, "openRouterRouting" | "vercelGatewayRouting" | "extraBody" | "toolStrictMode">
 > & {
 	openRouterRouting?: OpenAICompat["openRouterRouting"];
 	vercelGatewayRouting?: OpenAICompat["vercelGatewayRouting"];
 	extraBody?: OpenAICompat["extraBody"];
+	toolStrictMode: ResolvedToolStrictMode;
 };
 
 function detectStrictModeSupport(provider: string, baseUrl: string): boolean {
 	if (
 		provider === "openai" ||
+		provider === "openrouter" ||
 		provider === "cerebras" ||
 		provider === "together" ||
 		provider === "github-copilot" ||
@@ -28,6 +31,7 @@ function detectStrictModeSupport(provider: string, baseUrl: string): boolean {
 		normalizedBaseUrl.includes("models.inference.ai.azure.com") ||
 		normalizedBaseUrl.includes("api.cerebras.ai") ||
 		normalizedBaseUrl.includes("api.together.xyz") ||
+		normalizedBaseUrl.includes("openrouter.ai") ||
 		normalizedBaseUrl.includes("api.deepseek.com") ||
 		normalizedBaseUrl.includes("deepseek.com")
 	);
@@ -47,7 +51,7 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 
 	const isCerebras = provider === "cerebras" || baseUrl.includes("cerebras.ai");
 	const isZai = provider === "zai" || baseUrl.includes("api.z.ai");
-	const isKimiModel = model.id.includes("moonshotai/kimi");
+	const isKimiModel = model.id.includes("moonshotai/kimi") || /^kimi[-.]/i.test(model.id);
 	const isAlibaba = provider === "alibaba-coding-plan" || baseUrl.includes("dashscope");
 	const isQwen = model.id.toLowerCase().includes("qwen");
 
@@ -107,6 +111,7 @@ export function detectOpenAICompat(model: Model<"openai-completions">, resolvedB
 		vercelGatewayRouting: undefined,
 		supportsStrictMode: detectStrictModeSupport(provider, baseUrl),
 		extraBody: undefined,
+		toolStrictMode: isCerebras ? "all_strict" : "mixed",
 	};
 }
 
@@ -149,5 +154,6 @@ export function resolveOpenAICompat(
 		vercelGatewayRouting: model.compat.vercelGatewayRouting ?? detected.vercelGatewayRouting,
 		supportsStrictMode: model.compat.supportsStrictMode ?? detected.supportsStrictMode,
 		extraBody: model.compat.extraBody,
+		toolStrictMode: model.compat.toolStrictMode ?? detected.toolStrictMode,
 	};
 }

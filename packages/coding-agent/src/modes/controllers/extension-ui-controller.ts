@@ -120,10 +120,18 @@ export class ExtensionUiController {
 			getThinkingLevel: () => this.ctx.session.thinkingLevel,
 			setThinkingLevel: level => this.ctx.session.setThinkingLevel(level),
 			getCommands: () => [],
+			getSessionName: () => this.ctx.sessionManager.getSessionName(),
+			setSessionName: async name => {
+				await this.ctx.sessionManager.setSessionName(name, "user");
+				setSessionTerminalTitle(
+					this.ctx.sessionManager.getSessionName(),
+					this.ctx.sessionManager.getCwd(),
+					this.ctx.sessionManager.titleSource,
+				);
+			},
 		};
 		const contextActions: ExtensionContextActions = {
 			getModel: () => this.ctx.session.model,
-			getSearchDb: () => this.ctx.session.searchDb,
 			isIdle: () => !this.ctx.session.isStreaming,
 			abort: () => this.ctx.session.abort(),
 			hasPendingMessages: () => this.ctx.session.queuedMessageCount > 0,
@@ -164,7 +172,11 @@ export class ExtensionUiController {
 				if (!success) {
 					return { cancelled: true };
 				}
-				setSessionTerminalTitle(this.ctx.sessionManager.getSessionName(), this.ctx.sessionManager.getCwd());
+				setSessionTerminalTitle(
+					this.ctx.sessionManager.getSessionName(),
+					this.ctx.sessionManager.getCwd(),
+					this.ctx.sessionManager.titleSource,
+				);
 
 				// Call setup callback if provided
 				if (options?.setup) {
@@ -242,7 +254,11 @@ export class ExtensionUiController {
 				if (!result) {
 					return { cancelled: true };
 				}
-				setSessionTerminalTitle(this.ctx.sessionManager.getSessionName(), this.ctx.sessionManager.getCwd());
+				setSessionTerminalTitle(
+					this.ctx.sessionManager.getSessionName(),
+					this.ctx.sessionManager.getCwd(),
+					this.ctx.sessionManager.titleSource,
+				);
 				this.ctx.chatContainer.clear();
 				this.ctx.renderInitialMessages();
 				await this.ctx.reloadTodos();
@@ -382,10 +398,18 @@ export class ExtensionUiController {
 			getThinkingLevel: () => this.ctx.session.thinkingLevel,
 			setThinkingLevel: (level, persist) => this.ctx.session.setThinkingLevel(level, persist),
 			getCommands: () => [],
+			getSessionName: () => this.ctx.sessionManager.getSessionName(),
+			setSessionName: async name => {
+				await this.ctx.sessionManager.setSessionName(name, "user");
+				setSessionTerminalTitle(
+					this.ctx.sessionManager.getSessionName(),
+					this.ctx.sessionManager.getCwd(),
+					this.ctx.sessionManager.titleSource,
+				);
+			},
 		};
 		const contextActions: ExtensionContextActions = {
 			getModel: () => this.ctx.session.model,
-			getSearchDb: () => this.ctx.session.searchDb,
 			isIdle: () => !this.ctx.session.isStreaming,
 			abort: () => this.ctx.session.abort(),
 			hasPendingMessages: () => this.ctx.session.queuedMessageCount > 0,
@@ -583,7 +607,6 @@ export class ExtensionUiController {
 						sessionManager: this.ctx.session.sessionManager,
 						modelRegistry: this.ctx.session.modelRegistry,
 						model: this.ctx.session.model,
-						searchDb: this.ctx.session.searchDb,
 						isIdle: () => !this.ctx.session.isStreaming,
 						hasPendingMessages: () => this.ctx.session.queuedMessageCount > 0,
 						hasQueuedMessages: () => this.ctx.session.queuedMessageCount > 0,
@@ -676,6 +699,7 @@ export class ExtensionUiController {
 							finish(undefined);
 						}
 					: undefined,
+				onExternalEditor: dialogOptions?.onExternalEditor,
 				helpText: dialogOptions?.helpText,
 				initialIndex: dialogOptions?.initialIndex,
 				timeout: dialogOptions?.timeout,

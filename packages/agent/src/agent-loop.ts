@@ -10,6 +10,7 @@ import {
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@oh-my-pi/pi-ai";
+import { sanitizeText } from "@oh-my-pi/pi-natives";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -391,6 +392,10 @@ async function streamAssistantResponse(
 				if (partialMessage) {
 					partialMessage = event.partial;
 					context.messages[context.messages.length - 1] = partialMessage;
+					config.onAssistantMessageEvent?.(partialMessage, event);
+					if (signal?.aborted) {
+						continue;
+					}
 					stream.push({
 						type: "message_update",
 						assistantMessageEvent: event,
@@ -578,7 +583,12 @@ async function executeToolCalls(
 						toolCallId: toolCall.id,
 						toolName: toolCall.name,
 						args: argsForExecution,
-						partialResult,
+						partialResult: {
+							...partialResult,
+							content: partialResult.content.map(c =>
+								c.type === "text" ? { ...c, text: sanitizeText(c.text) } : c,
+							),
+						},
 					});
 				},
 				toolContext,

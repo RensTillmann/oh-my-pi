@@ -2,9 +2,9 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import { StringEnum } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { Text } from "@oh-my-pi/pi-tui";
+import { prompt } from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
 import chalk from "chalk";
-import { renderPromptTemplate } from "../config/prompt-templates";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import type { Theme } from "../modes/theme/theme";
 import todoWriteDescription from "../prompts/tools/todo-write.md" with { type: "text" };
@@ -251,7 +251,9 @@ function applyOps(file: TodoFile, ops: TodoWriteParams["ops"]): { file: TodoFile
 			case "update": {
 				const task = findTask(file.phases, op.id);
 				if (!task) {
-					errors.push(`Task "${op.id}" not found`);
+					const totalTasks = file.phases.reduce((sum, p) => sum + p.tasks.length, 0);
+					const hint = totalTasks === 0 ? " (todo list is empty — was it replaced or not yet created?)" : "";
+					errors.push(`Task "${op.id}" not found${hint}`);
 					break;
 				}
 				if (op.status !== undefined) task.status = op.status;
@@ -271,7 +273,11 @@ function applyOps(file: TodoFile, ops: TodoWriteParams["ops"]): { file: TodoFile
 						break;
 					}
 				}
-				if (!removed) errors.push(`Task "${op.id}" not found`);
+				if (!removed) {
+					const totalTasks = file.phases.reduce((sum, p) => sum + p.tasks.length, 0);
+					const hint = totalTasks === 0 ? " (todo list is empty)" : "";
+					errors.push(`Task "${op.id}" not found${hint}`);
+				}
 				break;
 			}
 		}
@@ -347,7 +353,7 @@ export class TodoWriteTool implements AgentTool<typeof todoWriteSchema, TodoWrit
 	readonly strict = true;
 
 	constructor(private readonly session: ToolSession) {
-		this.description = renderPromptTemplate(todoWriteDescription);
+		this.description = prompt.render(todoWriteDescription);
 	}
 
 	async execute(

@@ -16,6 +16,7 @@ export type * from "./config/prompt-templates";
 export * from "./config/prompt-templates";
 export type { RetrySettings, SkillsSettings } from "./config/settings";
 export { Settings, settings } from "./config/settings";
+export * from "./edit/modes/hashline";
 // Custom commands
 export type * from "./extensibility/custom-commands/types";
 export type * from "./extensibility/custom-tools";
@@ -37,7 +38,6 @@ export * from "./modes";
 export * from "./modes/components";
 // Theme utilities for custom tools
 export * from "./modes/theme/theme";
-export * from "./patch/hashline";
 // SDK for programmatic usage
 export * from "./sdk";
 export * from "./session/agent-session";
@@ -46,11 +46,13 @@ export * from "./session/auth-storage";
 // Compaction
 export * from "./session/compaction";
 export * from "./session/messages";
+export * from "./session/session-dump-format";
 export * from "./session/session-manager";
 export * from "./task/executor";
 export type * from "./task/types";
 // Tools (detail types and utilities)
 export * from "./tools";
+export * from "./utils/git";
 // UI components for extensions
 export {
 	HookEditorComponent as ExtensionEditorComponent,

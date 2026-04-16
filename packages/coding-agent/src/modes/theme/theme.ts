@@ -4,10 +4,10 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Effort } from "@oh-my-pi/pi-ai";
 import {
 	detectMacOSAppearance,
+	MacAppearanceObserver,
 	type HighlightColors as NativeHighlightColors,
 	highlightCode as nativeHighlightCode,
 	supportsLanguage as nativeSupportsLanguage,
-	startMacAppearanceObserver as startNativeMacObserver,
 } from "@oh-my-pi/pi-natives";
 import type { EditorTheme, MarkdownTheme, SelectListTheme, SymbolTheme } from "@oh-my-pi/pi-tui";
 import { adjustHsv, getCustomThemesDir, isEnoent, logger } from "@oh-my-pi/pi-utils";
@@ -19,6 +19,8 @@ import darkThemeJson from "./dark.json" with { type: "json" };
 import { defaultThemes } from "./defaults";
 import lightThemeJson from "./light.json" with { type: "json" };
 import { getMermaidAscii } from "./mermaid-cache";
+
+export { getLanguageFromPath } from "../../utils/lang-from-path";
 
 // ============================================================================
 // Symbol Presets
@@ -1161,9 +1163,14 @@ const langMap: Record<string, SymbolKey> = {
 	sh: "lang.shell",
 	zsh: "lang.shell",
 	fish: "lang.shell",
+	powershell: "lang.shell",
+	just: "lang.shell",
 	shell: "lang.shell",
 	html: "lang.html",
 	htm: "lang.html",
+	astro: "lang.html",
+	vue: "lang.html",
+	svelte: "lang.html",
 	css: "lang.css",
 	scss: "lang.css",
 	sass: "lang.css",
@@ -2072,10 +2079,12 @@ function startMacAppearanceObserver(): void {
 	stopMacAppearanceObserver();
 	if (!shouldUseMacOSAppearanceFallback()) return;
 	try {
-		macOSReportedAppearance = detectMacOSAppearance();
-		macObserver = startNativeMacObserver(appearance => {
-			macOSReportedAppearance = appearance;
-			reevaluateAutoTheme("macOS fallback");
+		macOSReportedAppearance = detectMacOSAppearance() ?? undefined;
+		macObserver = MacAppearanceObserver.start((err, appearance) => {
+			if (!err && (appearance === "dark" || appearance === "light")) {
+				macOSReportedAppearance = appearance;
+				reevaluateAutoTheme("macOS fallback");
+			}
 		});
 	} catch (err) {
 		logger.warn("Failed to start macOS appearance observer", { err });
@@ -2311,102 +2320,6 @@ export function highlightCode(code: string, lang?: string): string[] {
 	} catch {
 		return code.split("\n");
 	}
-}
-
-/**
- * Get language identifier from file path extension.
- */
-export function getLanguageFromPath(filePath: string): string | undefined {
-	const baseName = path.basename(filePath).toLowerCase();
-	if (baseName === ".env" || baseName.startsWith(".env.")) return "env";
-	if (
-		baseName === ".gitignore" ||
-		baseName === ".gitattributes" ||
-		baseName === ".gitmodules" ||
-		baseName === ".editorconfig" ||
-		baseName === ".npmrc" ||
-		baseName === ".prettierrc" ||
-		baseName === ".eslintrc"
-	) {
-		return "conf";
-	}
-
-	const ext = filePath.split(".").pop()?.toLowerCase();
-	if (!ext) return undefined;
-
-	const extToLang: Record<string, string> = {
-		ts: "typescript",
-		tsx: "typescript",
-		js: "javascript",
-		jsx: "javascript",
-		mjs: "javascript",
-		cjs: "javascript",
-		py: "python",
-		rb: "ruby",
-		rs: "rust",
-		go: "go",
-		java: "java",
-		kt: "kotlin",
-		swift: "swift",
-		c: "c",
-		h: "c",
-		cpp: "cpp",
-		cc: "cpp",
-		cxx: "cpp",
-		hpp: "cpp",
-		cs: "csharp",
-		php: "php",
-		sh: "bash",
-		bash: "bash",
-		zsh: "bash",
-		fish: "fish",
-		ps1: "powershell",
-		sql: "sql",
-		html: "html",
-		htm: "html",
-		css: "css",
-		scss: "scss",
-		sass: "sass",
-		less: "less",
-		json: "json",
-		yaml: "yaml",
-		yml: "yaml",
-		toml: "toml",
-		xml: "xml",
-		md: "markdown",
-		markdown: "markdown",
-		dockerfile: "dockerfile",
-		makefile: "makefile",
-		cmake: "cmake",
-		lua: "lua",
-		perl: "perl",
-		r: "r",
-		scala: "scala",
-		clj: "clojure",
-		ex: "elixir",
-		exs: "elixir",
-		erl: "erlang",
-		hs: "haskell",
-		ml: "ocaml",
-		vim: "vim",
-		graphql: "graphql",
-		proto: "protobuf",
-		tf: "hcl",
-		hcl: "hcl",
-		txt: "text",
-		text: "text",
-		log: "log",
-		csv: "csv",
-		tsv: "tsv",
-		ini: "ini",
-		cfg: "conf",
-		conf: "conf",
-		config: "conf",
-		properties: "conf",
-		env: "env",
-	};
-
-	return extToLang[ext];
 }
 
 export function getSymbolTheme(): SymbolTheme {

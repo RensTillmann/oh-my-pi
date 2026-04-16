@@ -1,15 +1,15 @@
 import { Editor, type KeyId, matchesKey, parseKittySequence } from "@oh-my-pi/pi-tui";
-import type { AppAction } from "../../config/keybindings";
+import type { AppKeybinding } from "../../config/keybindings";
 
 type ConfigurableEditorAction = Extract<
-	AppAction,
+	AppKeybinding,
 	| "app.interrupt"
 	| "app.clear"
 	| "app.exit"
 	| "app.suspend"
 	| "app.render.pause"
 	| "app.render.resume"
-	| "app.thinking.cycleLevel"
+	| "app.thinking.cycle"
 	| "app.model.cycleForward"
 	| "app.model.cycleBackward"
 	| "app.model.select"
@@ -28,9 +28,9 @@ const DEFAULT_ACTION_KEYS: Record<ConfigurableEditorAction, KeyId[]> = {
 	"app.clear": ["ctrl+c"],
 	"app.exit": ["ctrl+d"],
 	"app.suspend": ["ctrl+z"],
-	"app.render.pause": ["ctrl+s"],
-	"app.render.resume": ["ctrl+q"],
-	"app.thinking.cycleLevel": ["shift+tab"],
+	"app.render.pause": [],
+	"app.render.resume": [],
+	"app.thinking.cycle": ["shift+tab"],
 	"app.model.cycleForward": ["ctrl+p"],
 	"app.model.cycleBackward": ["shift+ctrl+p"],
 	"app.model.select": ["ctrl+l"],
@@ -52,19 +52,17 @@ export class CustomEditor extends Editor {
 	shouldBypassAutocompleteOnEscape?: () => boolean;
 	onClear?: () => void;
 	onExit?: () => void;
-	onSuspend?: () => void;
-	onPauseRender?: () => void;
-	onResumeRender?: () => void;
 	onCycleThinkingLevel?: () => void;
 	onCycleModelForward?: () => void;
 	onCycleModelBackward?: () => void;
 	onSelectModel?: () => void;
-	onSelectModelTemporary?: () => void;
 	onExpandTools?: () => void;
 	onToggleThinking?: () => void;
 	onExternalEditor?: () => void;
 	onHistorySearch?: () => void;
+	onSuspend?: () => void;
 	onShowHotkeys?: () => void;
+	onSelectModelTemporary?: () => void;
 	/** Called when the configured copy-prompt shortcut is pressed. */
 	onCopyPrompt?: () => void;
 	/** Called when the configured image-paste shortcut is pressed. */
@@ -73,6 +71,8 @@ export class CustomEditor extends Editor {
 	onDequeue?: () => void;
 	/** Called when Caps Lock is pressed. */
 	onCapsLock?: () => void;
+	onPauseRender?: () => void;
+	onResumeRender?: () => void;
 
 	/** Custom key handlers from extensions and non-built-in app actions. */
 	#customKeyHandlers = new Map<KeyId, () => void>();
@@ -134,13 +134,19 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
+		// Intercept configured temporary model selector shortcut
+		if (this.#matchesAction(data, "app.model.selectTemporary") && this.onSelectModelTemporary) {
+			this.onSelectModelTemporary();
+			return;
+		}
+
 		// Intercept configured suspend shortcut
 		if (this.#matchesAction(data, "app.suspend") && this.onSuspend) {
 			this.onSuspend();
 			return;
 		}
 
-		// Intercept configured render pause/resume shortcuts
+		// Intercept render pause/resume shortcuts
 		if (this.#matchesAction(data, "app.render.pause") && this.onPauseRender) {
 			this.onPauseRender();
 			return;
@@ -159,12 +165,6 @@ export class CustomEditor extends Editor {
 		// Intercept configured model selector shortcut
 		if (this.#matchesAction(data, "app.model.select") && this.onSelectModel) {
 			this.onSelectModel();
-			return;
-		}
-
-		// Intercept configured temporary model selector shortcut
-		if (this.#matchesAction(data, "app.model.selectTemporary") && this.onSelectModelTemporary) {
-			this.onSelectModelTemporary();
 			return;
 		}
 
@@ -193,7 +193,7 @@ export class CustomEditor extends Editor {
 		}
 
 		// Intercept configured thinking level cycling
-		if (this.#matchesAction(data, "app.thinking.cycleLevel") && this.onCycleThinkingLevel) {
+		if (this.#matchesAction(data, "app.thinking.cycle") && this.onCycleThinkingLevel) {
 			this.onCycleThinkingLevel();
 			return;
 		}

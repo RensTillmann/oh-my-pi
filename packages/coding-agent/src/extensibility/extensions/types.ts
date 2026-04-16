@@ -22,17 +22,16 @@ import type {
 	ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
 import type * as piCodingAgent from "@oh-my-pi/pi-coding-agent";
-import type { SearchDb } from "@oh-my-pi/pi-natives";
 import type { AutocompleteItem, Component, EditorComponent, EditorTheme, KeyId, TUI } from "@oh-my-pi/pi-tui";
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { Rule } from "../../capability/rule";
 import type { KeybindingsManager } from "../../config/keybindings";
 import type { ModelRegistry } from "../../config/model-registry";
+import type { EditToolDetails } from "../../edit";
 import type { BashResult } from "../../exec/bash-executor";
 import type { ExecOptions, ExecResult } from "../../exec/exec";
 import type { PythonResult } from "../../ipy/executor";
 import type { Theme } from "../../modes/theme/theme";
-import type { EditToolDetails } from "../../patch";
 import type { CompactionPreparation, CompactionResult } from "../../session/compaction";
 import type { CustomMessage } from "../../session/messages";
 import type {
@@ -81,6 +80,8 @@ export interface ExtensionUIDialogOptions {
 	onLeft?: () => void;
 	/** Invoked when user presses right arrow in select dialogs */
 	onRight?: () => void;
+	/** Invoked when user presses the external editor shortcut in select dialogs */
+	onExternalEditor?: () => void;
 	/** Optional footer hint text rendered by interactive selector */
 	helpText?: string;
 }
@@ -230,8 +231,6 @@ export interface ExtensionContext {
 	modelRegistry: ModelRegistry;
 	/** Current model (may be undefined) */
 	model: Model | undefined;
-	/** Shared native search DB for grep/glob/fuzzyFind-backed workflows. */
-	searchDb?: SearchDb;
 	/** Whether the agent is idle (not streaming) */
 	isIdle(): boolean;
 	/** Abort the current agent operation */
@@ -566,7 +565,7 @@ export interface ToolExecutionEndEvent {
 /** Fired when auto-compaction starts */
 export interface AutoCompactionStartEvent {
 	type: "auto_compaction_start";
-	reason: "threshold" | "overflow";
+	reason: "threshold" | "overflow" | "idle";
 	action: "context-full" | "handoff";
 }
 
@@ -1107,6 +1106,12 @@ export interface ExtensionAPI {
 	/** Set thinking level for the current session. */
 	setThinkingLevel(level: ThinkingLevel): void;
 
+	/** Get the current session name. */
+	getSessionName(): string | undefined;
+
+	/** Set the session name. Persists to the session file. */
+	setSessionName(name: string): Promise<void>;
+
 	// =========================================================================
 	// Provider Registration
 	// =========================================================================
@@ -1293,12 +1298,13 @@ export interface ExtensionActions {
 	setModel: SetModelHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
 	setThinkingLevel: SetThinkingLevelHandler;
+	getSessionName: () => string | undefined;
+	setSessionName: (name: string) => Promise<void>;
 }
 
 /** Actions for ExtensionContext (ctx.* in event handlers). */
 export interface ExtensionContextActions {
 	getModel: () => Model | undefined;
-	getSearchDb?: () => SearchDb | undefined;
 	isIdle: () => boolean;
 	abort: () => void;
 	hasPendingMessages: () => boolean;

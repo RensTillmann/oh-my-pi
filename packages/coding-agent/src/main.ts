@@ -11,19 +11,35 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { $env, getProjectDir, logger, postmortem, setProjectDir, VERSION } from "@oh-my-pi/pi-utils";
+import { $env, getConfigDirName, getProjectDir, logger, postmortem, setProjectDir, VERSION } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
+import { invalidate as invalidateFsCache } from "./capability/fs";
 import type { Args } from "./cli/args";
 import { processFileArguments } from "./cli/file-processor";
+import { buildInitialMessage } from "./cli/initial-message";
 import { listModels } from "./cli/list-models";
 import { selectSession } from "./cli/session-picker";
 import { findConfigFile } from "./config";
 import { ModelRegistry, ModelsConfigFile } from "./config/model-registry";
 import { resolveCliModel, resolveModelRoleValue, resolveModelScope, type ScopedModel } from "./config/model-resolver";
-import { Settings, settings } from "./config/settings";
-import { initializeWithSettings, isExtensionDisabled } from "./discovery";
+import { getDefault, type SettingPath, Settings, settings } from "./config/settings";
+import { initializeWithSettings } from "./discovery";
+import {
+	clearClaudePluginRootsCache,
+	injectPluginDirRoots,
+	preloadPluginRoots,
+	resolveActiveProjectRegistryPath,
+} from "./discovery/helpers";
 import { exportFromFile } from "./export/html";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
+import {
+	getInstalledPluginsRegistryPath,
+	getMarketplacesCacheDir,
+	getMarketplacesRegistryPath,
+	getPluginsCacheDir,
+	MarketplaceManager,
+} from "./extensibility/plugins/marketplace";
+import type { MCPManager } from "./mcp";
 import { InteractiveMode, runAcpMode, runPrintMode, runRpcMode } from "./modes";
 import { initTheme, stopThemeWatcher } from "./modes/theme/theme";
 import type { SubmittedUserInput } from "./modes/types";
@@ -31,7 +47,9 @@ import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage
 import type { AgentSession } from "./session/agent-session";
 import { resolveResumableSession, type SessionInfo, SessionManager } from "./session/session-manager";
 import { resolvePromptInput } from "./system-prompt";
+import type { LspStartupServerInfo } from "./tools";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog";
+import type { EventBus } from "./utils/event-bus";
 
 async function checkForNewVersion(currentVersion: string): Promise<string | undefined> {
 	if (!settings.get("startup.checkUpdate")) {
@@ -44,13 +62,38 @@ async function checkForNewVersion(currentVersion: string): Promise<string | unde
 		const data = (await response.json()) as { version?: string };
 		const latestVersion = data.version;
 
-		if (latestVersion && latestVersion !== currentVersion) {
+		if (latestVersion && Bun.semver.order(latestVersion, currentVersion) > 0) {
 			return latestVersion;
 		}
 
 		return undefined;
 	} catch {
 		return undefined;
+	}
+}
+
+const RPC_DEFAULTED_SETTING_PATHS: SettingPath[] = [
+	"todo.enabled",
+	"todo.reminders",
+	"todo.reminders.max",
+	"todo.eager",
+	"async.enabled",
+	"async.maxJobs",
+	"bash.autoBackground.enabled",
+	"bash.autoBackground.thresholdMs",
+	"task.isolation.mode",
+	"task.isolation.merge",
+	"task.isolation.commits",
+	"task.eager",
+	"task.maxConcurrency",
+	"task.maxRecursionDepth",
+	"task.disabledAgents",
+	"task.agentModelOverrides",
+];
+
+function applyRpcDefaultSettingOverrides(): void {
+	for (const settingPath of RPC_DEFAULTED_SETTING_PATHS) {
+		settings.override(settingPath, getDefault(settingPath));
 	}
 }
 
@@ -101,12 +144,21 @@ async function runInteractiveMode(
 	versionCheckPromise: Promise<string | undefined>,
 	initialMessages: string[],
 	setExtensionUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
-	lspServers: Array<{ name: string; status: "ready" | "error"; fileTypes: string[]; error?: string }> | undefined,
-	mcpManager: import("./mcp").MCPManager | undefined,
+	lspServers: LspStartupServerInfo[] | undefined,
+	mcpManager: MCPManager | undefined,
+	eventBus?: EventBus,
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 ): Promise<void> {
-	const mode = new InteractiveMode(session, version, changelogMarkdown, setExtensionUIContext, lspServers, mcpManager);
+	const mode = new InteractiveMode(
+		session,
+		version,
+		changelogMarkdown,
+		setExtensionUIContext,
+		lspServers,
+		mcpManager,
+		eventBus,
+	);
 
 	await mode.init();
 
@@ -136,7 +188,7 @@ async function runInteractiveMode(
 		}
 	}
 
-	if (initialMessage) {
+	if (initialMessage !== undefined) {
 		try {
 			await session.prompt(initialMessage, { images: initialImages });
 		} catch (error: unknown) {
@@ -158,33 +210,6 @@ async function runInteractiveMode(
 		const input = await mode.getUserInput();
 		await submitInteractiveInput(mode, session, input);
 	}
-}
-
-async function prepareInitialMessage(
-	parsed: Args,
-	autoResizeImages: boolean,
-): Promise<{
-	initialMessage?: string;
-	initialImages?: ImageContent[];
-}> {
-	if (parsed.fileArgs.length === 0) {
-		return {};
-	}
-
-	const { text, images } = await processFileArguments(parsed.fileArgs, { autoResizeImages });
-
-	let initialMessage: string;
-	if (parsed.messages.length > 0) {
-		initialMessage = text + parsed.messages[0];
-		parsed.messages.shift();
-	} else {
-		initialMessage = text;
-	}
-
-	return {
-		initialMessage,
-		initialImages: images.length > 0 ? images : undefined,
-	};
 }
 
 function normalizePathForComparison(value: string): string {
@@ -236,6 +261,21 @@ async function getChangelogForDisplay(parsed: Args): Promise<string | undefined>
 }
 
 async function createSessionManager(parsed: Args, cwd: string): Promise<SessionManager | undefined> {
+	if (parsed.fork) {
+		if (parsed.noSession) {
+			throw new Error("--fork requires session persistence");
+		}
+		const forkSource = parsed.fork;
+		if (forkSource.includes("/") || forkSource.includes("\\") || forkSource.endsWith(".jsonl")) {
+			return await SessionManager.forkFrom(forkSource, cwd, parsed.sessionDir);
+		}
+		const match = await resolveResumableSession(forkSource, cwd, parsed.sessionDir);
+		if (!match) {
+			throw new Error(`Session "${forkSource}" not found.`);
+		}
+		return await SessionManager.forkFrom(match.session.path, cwd, parsed.sessionDir);
+	}
+
 	if (parsed.noSession) {
 		return SessionManager.inMemory();
 	}
@@ -268,6 +308,17 @@ async function createSessionManager(parsed: Args, cwd: string): Promise<SessionM
 	// If --session-dir provided without --continue/--resume, create new session there
 	if (parsed.sessionDir) {
 		return SessionManager.create(cwd, parsed.sessionDir);
+	}
+	// Auto-resume: behave like --continue if the setting is enabled and a prior
+	// session exists. When a prior session is resumed, mark parsed.continue so
+	// buildSessionOptions restores the session's model/thinking instead of
+	// overriding them with CLI defaults.
+	if (settings.get("autoResume")) {
+		const manager = await SessionManager.continueRecent(cwd, parsed.sessionDir);
+		if (manager.getEntries().length > 0) {
+			parsed.continue = true;
+		}
+		return manager;
 	}
 	// Default case (new session) returns undefined, SDK will create one
 	return undefined;
@@ -343,14 +394,12 @@ function discoverSystemPromptFile(): string | undefined {
 
 /** Discover APPEND_SYSTEM.md file if no CLI append system prompt was provided */
 function discoverAppendSystemPromptFile(): string | undefined {
-	// Project-level takes precedence; skip if disabled for this project
 	const projectPath = findConfigFile("APPEND_SYSTEM.md", { user: false });
-	if (projectPath && !isExtensionDisabled("append-system-prompt:project:APPEND_SYSTEM.md")) {
+	if (projectPath) {
 		return projectPath;
 	}
-	// Fall back to global; skip if disabled globally
 	const globalPath = findConfigFile("APPEND_SYSTEM.md", { user: true });
-	if (globalPath && !isExtensionDisabled("append-system-prompt:user:APPEND_SYSTEM.md")) {
+	if (globalPath) {
 		return globalPath;
 	}
 	return undefined;
@@ -374,6 +423,9 @@ async function buildSessionOptions(
 
 	if (sessionManager) {
 		options.sessionManager = sessionManager;
+	}
+	if (parsed.providerSessionId) {
+		options.providerSessionId = parsed.providerSessionId;
 	}
 
 	// Model from CLI
@@ -403,7 +455,9 @@ async function buildSessionOptions(
 			}
 		} else if (resolved.model) {
 			options.model = resolved.model;
-			settings.overrideModelRoles({ default: `${resolved.model.provider}/${resolved.model.id}` });
+			settings.overrideModelRoles({
+				default: resolved.selector ?? `${resolved.model.provider}/${resolved.model.id}`,
+			});
 			if (!parsed.thinking && resolved.thinkingLevel) {
 				options.thinkingLevel = resolved.thinkingLevel;
 			}
@@ -417,6 +471,7 @@ async function buildSessionOptions(
 				{
 					settings,
 					matchPreferences: modelMatchPreferences,
+					modelRegistry,
 				},
 			);
 			const rememberedResolvedModel = rememberedSpec.model;
@@ -516,19 +571,16 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 
 	// Initialize theme early with defaults (CLI commands need symbols)
 	// Will be re-initialized with user preferences later
-	await logger.timeAsync("initTheme:initial", () => initTheme());
+	await logger.time("initTheme:initial", initTheme);
 
 	const parsedArgs = parsed;
-	await logger.timeAsync("maybeAutoChdir", () => maybeAutoChdir(parsedArgs));
+	await logger.time("maybeAutoChdir", maybeAutoChdir, parsedArgs);
 
 	const notifs: (InteractiveModeNotify | null)[] = [];
 
 	// Create AuthStorage and ModelRegistry upfront
-	const { authStorage, modelRegistry } = await logger.timeAsync("discoverModels", async () => {
-		const authStorage = await discoverAuthStorage();
-		const modelRegistry = new ModelRegistry(authStorage);
-		return { authStorage, modelRegistry };
-	});
+	const authStorage = await logger.time("discoverModels", discoverAuthStorage);
+	const modelRegistry = new ModelRegistry(authStorage);
 
 	if (parsedArgs.version) {
 		process.stdout.write(`${VERSION}\n`);
@@ -536,6 +588,7 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	}
 
 	if (parsedArgs.listModels !== undefined) {
+		await logger.time("settings:init:list-models", Settings.init, { cwd: getProjectDir() });
 		await modelRegistry.refresh("online");
 		const searchPattern = typeof parsedArgs.listModels === "string" ? parsedArgs.listModels : undefined;
 		await listModels(modelRegistry, searchPattern);
@@ -562,32 +615,39 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 	}
 
 	const cwd = getProjectDir();
-	await logger.timeAsync("settings:init", () => Settings.init({ cwd }));
+	await logger.time("settings:init", Settings.init, { cwd });
+	if (parsedArgs.mode === "rpc") {
+		applyRpcDefaultSettingOverrides();
+	}
 	if (parsedArgs.noPty) {
 		Bun.env.PI_NO_PTY = "1";
 	}
-	const {
-		pipedInput,
-		initialMessage: initMsg,
-		initialImages,
-	} = await logger.timeAsync("prepareInitialMessage", async () => {
+	if (parsedArgs.noTitle || parsedArgs.mode === "rpc") {
+		Bun.env.PI_NO_TITLE = "1";
+	}
+	const { pipedInput, fileText, fileImages } = await logger.time("prepareInitialMessage", async () => {
 		const pipedInput = await readPipedInput();
-		let { initialMessage, initialImages } = await prepareInitialMessage(
-			parsedArgs,
-			settings.get("images.autoResize"),
-		);
-		if (pipedInput) {
-			initialMessage = initialMessage ? `${initialMessage}\n${pipedInput}` : pipedInput;
+		if (parsedArgs.fileArgs.length === 0) {
+			return { pipedInput, fileText: undefined, fileImages: undefined };
 		}
-		return { pipedInput, initialMessage, initialImages };
+		const processed = await processFileArguments(parsedArgs.fileArgs, {
+			autoResizeImages: settings.get("images.autoResize"),
+		});
+		return { pipedInput, fileText: processed.text, fileImages: processed.images };
 	});
-	const initialMessage = initMsg;
+	const { initialMessage, initialImages } = buildInitialMessage({
+		parsed: parsedArgs,
+		fileText,
+		fileImages,
+		stdinContent: pipedInput,
+	});
 	const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
 	const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
 	const mode = parsedArgs.mode || "text";
 
 	// Initialize discovery system with settings for provider persistence
-	logger.time("initializeWithSettings", () => initializeWithSettings(settings, cwd));
+	logger.time("initializeWithSettings");
+	initializeWithSettings(settings);
 	modelRegistry.refreshInBackground();
 
 	// Apply model role overrides from CLI args or env vars (ephemeral, not persisted)
@@ -602,14 +662,14 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 		});
 	}
 
-	await logger.timeAsync("initTheme:final", () =>
-		initTheme(
-			isInteractive,
-			settings.get("symbolPreset"),
-			settings.get("colorBlindMode"),
-			settings.get("theme.dark"),
-			settings.get("theme.light"),
-		),
+	await logger.time(
+		"initTheme:final",
+		initTheme,
+		isInteractive,
+		settings.get("symbolPreset"),
+		settings.get("colorBlindMode"),
+		settings.get("theme.dark"),
+		settings.get("theme.light"),
 	);
 
 	let scopedModels: ScopedModel[] = [];
@@ -618,24 +678,26 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 		usageOrder: settings.getStorage()?.getModelUsageOrder(),
 	};
 	if (modelPatterns && modelPatterns.length > 0) {
-		scopedModels = await logger.timeAsync("resolveModelScope", () =>
-			resolveModelScope(modelPatterns, modelRegistry, modelMatchPreferences),
+		scopedModels = await logger.time(
+			"resolveModelScope",
+			resolveModelScope,
+			modelPatterns,
+			modelRegistry,
+			modelMatchPreferences,
 		);
 	}
 
 	// Create session manager based on CLI flags
-	let sessionManager = await logger.timeAsync("createSessionManager", () => createSessionManager(parsedArgs, cwd));
+	let sessionManager = await logger.time("createSessionManager", createSessionManager, parsedArgs, cwd);
 
 	// Handle --resume (no value): show session picker
-	if (parsedArgs.resume === true) {
-		const sessions = await logger.timeAsync("SessionManager.list", () =>
-			SessionManager.list(cwd, parsedArgs.sessionDir),
-		);
+	if (parsedArgs.resume === true && !parsedArgs.fork) {
+		const sessions = await logger.time("SessionManager.list", SessionManager.list, cwd, parsedArgs.sessionDir);
 		if (sessions.length === 0) {
 			process.stdout.write(`${chalk.dim("No sessions found")}\n`);
 			return;
 		}
-		const selectedPath = await logger.timeAsync("selectSession", () => selectSession(sessions));
+		const selectedPath = await logger.time("selectSession", selectSession, sessions);
 		if (!selectedPath) {
 			process.stdout.write(`${chalk.dim("No session selected")}\n`);
 			return;
@@ -643,8 +705,55 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 		sessionManager = await SessionManager.open(selectedPath);
 	}
 
-	const { options: sessionOptions } = await logger.timeAsync("buildSessionOptions", () =>
-		buildSessionOptions(parsedArgs, scopedModels, sessionManager, modelRegistry),
+	// Wire --plugin-dir and preload plugin roots for sync consumers (LSP config)
+	const home = os.homedir();
+	if (parsedArgs.pluginDirs && parsedArgs.pluginDirs.length > 0) {
+		await logger.time("injectPluginDirRoots", injectPluginDirRoots, home, parsedArgs.pluginDirs!, getProjectDir());
+	} else {
+		await logger.time("preloadPluginRoots", preloadPluginRoots, home, getProjectDir());
+	}
+
+	// Background marketplace auto-update — never blocks startup.
+	const autoUpdate = settings.get("marketplace.autoUpdate");
+	if (autoUpdate !== "off") {
+		void (async () => {
+			try {
+				const mgr = new MarketplaceManager({
+					marketplacesRegistryPath: getMarketplacesRegistryPath(),
+					installedRegistryPath: getInstalledPluginsRegistryPath(),
+					projectInstalledRegistryPath: (await resolveActiveProjectRegistryPath(getProjectDir())) ?? undefined,
+					marketplacesCacheDir: getMarketplacesCacheDir(),
+					pluginsCacheDir: getPluginsCacheDir(),
+					clearPluginRootsCache: (extraPaths?: readonly string[]) => {
+						const h = os.homedir();
+						invalidateFsCache(path.join(h, ".claude", "plugins", "installed_plugins.json"));
+						invalidateFsCache(path.join(h, getConfigDirName(), "plugins", "installed_plugins.json"));
+						for (const p of extraPaths ?? []) invalidateFsCache(p);
+						clearClaudePluginRootsCache();
+					},
+				});
+				await mgr.refreshStaleMarketplaces();
+				const updates = await mgr.checkForUpdates();
+				if (updates.length === 0) return;
+				if (autoUpdate === "auto") {
+					await mgr.upgradeAllPlugins();
+					logger.debug(`Auto-upgraded ${updates.length} marketplace plugin(s)`);
+				} else {
+					logger.debug(`${updates.length} marketplace plugin update(s) available \u2014 /marketplace upgrade`);
+				}
+			} catch {
+				// Silently ignore — network failure, corrupt data, offline.
+			}
+		})();
+	}
+
+	const { options: sessionOptions } = await logger.time(
+		"buildSessionOptions",
+		buildSessionOptions,
+		parsedArgs,
+		scopedModels,
+		sessionManager,
+		modelRegistry,
 	);
 	sessionOptions.authStorage = authStorage;
 	sessionOptions.modelRegistry = modelRegistry;
@@ -663,10 +772,12 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 		}
 	}
 
-	const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager } = await logger.timeAsync(
+	const { session, setToolUIContext, modelFallbackMessage, lspServers, mcpManager, eventBus } = await logger.time(
 		"createAgentSession",
-		() => createAgentSession(sessionOptions),
+		createAgentSession,
+		sessionOptions,
 	);
+	logger.time("main:afterCreateSession");
 	if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
 		authStorage.setRuntimeApiKey(session.model.provider, parsedArgs.apiKey);
 	}
@@ -717,12 +828,34 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 		process.exit(1);
 	}
 
-	if (mode === "acp") {
-		await runAcpMode(session);
-	} else if (mode === "rpc") {
+	const extensionFlagValues = session.extensionRunner?.getFlagValues() ?? new Map<string, boolean | string>();
+	const createAcpSession = async (cwd: string) => {
+		const nextSettings = await session.settings.cloneForCwd(cwd);
+		const nextSessionManager = SessionManager.create(cwd, parsedArgs.sessionDir);
+		const { session: nextSession } = await createAgentSession({
+			...sessionOptions,
+			cwd,
+			sessionManager: nextSessionManager,
+			settings: nextSettings,
+			authStorage,
+			modelRegistry,
+			hasUI: false,
+		});
+		if (nextSession.extensionRunner) {
+			for (const [flagName, value] of extensionFlagValues) {
+				nextSession.extensionRunner.setFlagValue(flagName, value);
+			}
+		}
+		return nextSession;
+	};
+
+	if (mode === "rpc") {
 		await runRpcMode(session);
+	} else if (mode === "acp") {
+		await runAcpMode(session, createAcpSession);
 	} else if (isInteractive) {
 		const versionCheckPromise = checkForNewVersion(VERSION).catch(() => undefined);
+		logger.time("main:getChangelogForDisplay");
 		const changelogMarkdown = await getChangelogForDisplay(parsedArgs);
 
 		const scopedModelsForDisplay = sessionOptions.scopedModels ?? scopedModels;
@@ -736,8 +869,11 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 			process.stdout.write(`${chalk.dim(`Model scope: ${modelList} ${chalk.gray("(Ctrl+P to cycle)")}`)}\n`);
 		}
 
-		if ($env.PI_TIMING === "1") {
+		if ($env.PI_TIMING) {
 			logger.printTimings();
+			if ($env.PI_TIMING === "x") {
+				process.exit(0);
+			}
 		}
 
 		logger.endTiming();
@@ -751,6 +887,7 @@ export async function runRootCommand(parsed: Args, rawArgs: string[]): Promise<v
 			setToolUIContext,
 			lspServers,
 			mcpManager,
+			eventBus,
 			initialMessage,
 			initialImages,
 		);

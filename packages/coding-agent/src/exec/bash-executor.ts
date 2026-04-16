@@ -180,8 +180,10 @@ export async function executeBash(
 						timeoutMs: options?.timeout,
 						signal: runAbortController.signal,
 					},
-					chunk => {
-						enqueueChunk(chunk);
+					(err, chunk) => {
+						if (!err) {
+							enqueueChunk(chunk);
+						}
 					},
 				);
 

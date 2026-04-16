@@ -3,7 +3,7 @@
  * Handles data loading, tree building, filtering, and toggle persistence.
  */
 import * as path from "node:path";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, parseFrontmatter } from "@oh-my-pi/pi-utils";
 import type { AppendSystemPrompt } from "../../../capability/append-system-prompt";
 import type { ContextFile } from "../../../capability/context-file";
 import type { ExtensionModule } from "../../../capability/extension-module";
@@ -25,7 +25,6 @@ import {
 	isProviderEnabled,
 	loadCapability,
 } from "../../../discovery";
-import { parseFrontmatter } from "../../../utils/frontmatter";
 import type {
 	DashboardState,
 	Extension,
