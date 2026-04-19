@@ -194,7 +194,10 @@ export class GrepTool implements AgentTool<typeof grepSchema, GrepToolDetails> {
 					undefined,
 				);
 			} catch (err) {
-				if (err instanceof Error && err.message.startsWith("regex parse error")) {
+				if (
+					err instanceof Error &&
+					(err.message.startsWith("regex parse error") || err.message.startsWith("Regex error:"))
+				) {
 					throw new ToolError(err.message);
 				}
 				throw err;
