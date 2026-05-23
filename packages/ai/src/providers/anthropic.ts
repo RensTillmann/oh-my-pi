@@ -1553,14 +1553,28 @@ export function convertAnthropicMessages(
 					block.type === "thinking" && !!block.thinkingSignature && block.thinkingSignature.trim().length > 0,
 			);
 
+			// Once an assistant turn has emitted a tool_use, the Anthropic API treats
+			// the turn as committed to tool-calling: only further tool_use blocks may
+			// follow. A text / thinking / redacted_thinking block emitted after a
+			// tool_use within the same turn breaks that contract and the API rejects
+			// the request on replay with the misleading message '`tool_use` ids were
+			// found without `tool_result` blocks immediately after: <id>' (referring
+			// to the tool_use that the offending block follows). The model occasionally
+			// emits such structures with adaptive thinking on Opus 4.7+. Drop any
+			// non-tool_use block that appears after the first tool_use so the
+			// structurally anomalous history can still be replayed.
+			let seenToolUse = false;
+
 			for (const block of msg.content) {
 				if (block.type === "text") {
+					if (seenToolUse) continue;
 					if (block.text.trim().length === 0) continue;
 					blocks.push({
 						type: "text",
 						text: block.text.toWellFormed(),
 					});
 				} else if (block.type === "thinking") {
+					if (seenToolUse) continue;
 					if (hasSignedThinking) {
 						if (!block.thinkingSignature || block.thinkingSignature.trim().length === 0) {
 							if (block.thinking.trim().length === 0) continue;
@@ -1591,12 +1605,14 @@ export function convertAnthropicMessages(
 						});
 					}
 				} else if (block.type === "redactedThinking") {
+					if (seenToolUse) continue;
 					if (block.data.trim().length === 0) continue;
 					blocks.push({
 						type: "redacted_thinking",
 						data: block.data,
 					});
 				} else if (block.type === "toolCall") {
+					seenToolUse = true;
 					blocks.push({
 						type: "tool_use",
 						id: block.id,
