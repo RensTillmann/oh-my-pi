@@ -115,6 +115,38 @@ describe("model thinking metadata", () => {
 		expect(mapEffortToAnthropicAdaptiveEffort(opus46, Effort.XHigh)).toBe("max");
 		expect(() => mapEffortToAnthropicAdaptiveEffort(sonnet46, Effort.XHigh)).toThrow(/not supported/);
 	});
+
+	it("maps the real 5-tier xhigh ladder only for Opus 4.7+ on the first-party API", () => {
+		const opus47 = createModel({ id: "claude-opus-4-7", api: "anthropic-messages", provider: "anthropic" });
+		const opus48 = createModel({ id: "claude-opus-4-8", api: "anthropic-messages", provider: "anthropic" });
+		const opus46 = createModel({ id: "claude-opus-4-6", api: "anthropic-messages", provider: "anthropic" });
+		const opus47Bedrock = createModel({
+			id: "claude-opus-4-7",
+			api: "bedrock-converse-stream",
+			provider: "amazon-bedrock",
+		});
+		const sonnet46 = createModel({ id: "claude-sonnet-4-6", api: "anthropic-messages", provider: "anthropic" });
+
+		// Opus 4.7+ on the first-party API exposes the full 5-tier ladder.
+		expect(mapEffortToAnthropicAdaptiveEffort(opus47, Effort.Minimal)).toBe("low");
+		expect(mapEffortToAnthropicAdaptiveEffort(opus47, Effort.Low)).toBe("medium");
+		expect(mapEffortToAnthropicAdaptiveEffort(opus47, Effort.Medium)).toBe("high");
+		expect(mapEffortToAnthropicAdaptiveEffort(opus47, Effort.High)).toBe("xhigh");
+		expect(mapEffortToAnthropicAdaptiveEffort(opus47, Effort.XHigh)).toBe("max");
+		expect(mapEffortToAnthropicAdaptiveEffort(opus48, Effort.High)).toBe("xhigh");
+		expect(mapEffortToAnthropicAdaptiveEffort(opus48, Effort.XHigh)).toBe("max");
+
+		// Opus 4.6 first-party falls back to the legacy 4-tier map.
+		expect(mapEffortToAnthropicAdaptiveEffort(opus46, Effort.High)).toBe("high");
+		expect(mapEffortToAnthropicAdaptiveEffort(opus46, Effort.XHigh)).toBe("max");
+
+		// The xhigh tier is gated on the first-party transport; Bedrock stays legacy.
+		expect(mapEffortToAnthropicAdaptiveEffort(opus47Bedrock, Effort.High)).toBe("high");
+		expect(mapEffortToAnthropicAdaptiveEffort(opus47Bedrock, Effort.XHigh)).toBe("max");
+
+		// Unsupported effort still throws regardless of the ladder.
+		expect(() => mapEffortToAnthropicAdaptiveEffort(sonnet46, Effort.XHigh)).toThrow(/not supported/);
+	});
 });
 
 describe("bundled GPT-5.4 model metadata", () => {

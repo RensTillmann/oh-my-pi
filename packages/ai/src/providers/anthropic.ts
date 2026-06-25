@@ -6,9 +6,12 @@ import type {
 	ContentBlockParam,
 	MessageCreateParamsStreaming,
 	MessageParam,
+	OutputConfig,
+	ThinkingConfigAdaptive,
+	ThinkingConfigParam,
 } from "@anthropic-ai/sdk/resources/messages";
 import { $env, abortableSleep, isEnoent } from "@oh-my-pi/pi-utils";
-import { disablesParallelToolUse, hasOpus47ApiRestrictions, mapEffortToAnthropicAdaptiveEffort, supportsMidConversationSystemMessages } from "../model-thinking";
+import { disablesParallelToolUse, hasOpus47ApiRestrictions, mapEffortToAnthropicAdaptiveEffort, supportsMidConversationSystemMessages, type AnthropicAdaptiveEffort } from "../model-thinking";
 import { calculateCost } from "../models";
 import { getEnvApiKey, OUTPUT_FALLBACK_BUFFER } from "../stream";
 import type {
@@ -168,9 +171,13 @@ export function buildAnthropicHeaders(options: AnthropicHeaderOptions): Record<s
 
 type AnthropicCacheControl = { type: "ephemeral"; ttl?: "1h" | "5m" };
 
-type AnthropicSamplingParams = MessageCreateParamsStreaming & {
+type AnthropicSamplingParams = Omit<MessageCreateParamsStreaming, "output_config" | "thinking"> & {
 	top_p?: number;
 	top_k?: number;
+	// SDK 0.78 OutputConfig.effort omits the Opus 4.7+ "xhigh" tier; widen locally (preserve `format`).
+	output_config?: Omit<OutputConfig, "effort"> & { effort?: AnthropicAdaptiveEffort | null };
+	// SDK 0.78 ThinkingConfigAdaptive omits `display`; Opus 4.7+ needs display:"summarized".
+	thinking?: ThinkingConfigParam | (ThinkingConfigAdaptive & { display?: "summarized" });
 };
 function getCacheControl(
 	baseUrl: string,
@@ -361,7 +368,7 @@ function convertContentBlocks(content: (TextContent | ImageContent)[]):
 	return blocks;
 }
 
-export type AnthropicEffort = "low" | "medium" | "high" | "max";
+export type AnthropicEffort = AnthropicAdaptiveEffort;
 
 export interface AnthropicOptions extends StreamOptions {
 	/**
@@ -736,7 +743,10 @@ export const streamAnthropic: StreamFunction<"anthropic-messages"> = (
 					"Anthropic stream timed out while waiting for the first event",
 				);
 				const { requestSignal } = activeAbortTracker;
-				const anthropicRequest = client.messages.create({ ...params, stream: true }, { signal: requestSignal });
+				const anthropicRequest = client.messages.create(
+					{ ...params, stream: true } as MessageCreateParamsStreaming,
+					{ signal: requestSignal },
+				);
 				let streamedReplayUnsafeContent = false;
 
 				try {
@@ -1148,7 +1158,7 @@ function createClient(
 	return { client, isOAuthToken: oauthToken };
 }
 
-function disableThinkingIfToolChoiceForced(params: MessageCreateParamsStreaming): void {
+function disableThinkingIfToolChoiceForced(params: AnthropicSamplingParams): void {
 	const toolChoice = params.tool_choice;
 	if (!toolChoice) return;
 	if (toolChoice.type === "any" || toolChoice.type === "tool") {
@@ -1157,7 +1167,7 @@ function disableThinkingIfToolChoiceForced(params: MessageCreateParamsStreaming)
 	}
 }
 
-function ensureMaxTokensForThinking(params: MessageCreateParamsStreaming, model: Model<"anthropic-messages">): void {
+function ensureMaxTokensForThinking(params: AnthropicSamplingParams, model: Model<"anthropic-messages">): void {
 	const thinking = params.thinking;
 	if (!thinking || thinking.type !== "enabled") return;
 
@@ -1198,7 +1208,7 @@ function applyCacheControlToLastTextBlock(
 	applyCacheControlToLastBlock(blocks, cacheControl);
 }
 
-function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?: AnthropicCacheControl): void {
+function applyPromptCaching(params: AnthropicSamplingParams, cacheControl?: AnthropicCacheControl): void {
 	if (!cacheControl) return;
 
 	// Skip if cache_control breakpoints were already placed externally on messages.
@@ -1287,7 +1297,7 @@ function normalizeCacheControlBlockTtl(block: CacheControlBlock, seenFiveMinute:
 	}
 }
 
-function normalizeCacheControlTtlOrdering(params: MessageCreateParamsStreaming): void {
+function normalizeCacheControlTtlOrdering(params: AnthropicSamplingParams): void {
 	const seenFiveMinute = { value: false };
 	if (params.tools) {
 		for (const tool of params.tools as Array<Anthropic.Messages.Tool & CacheControlBlock>) {
@@ -1352,7 +1362,7 @@ function stripMessageCacheControl(
 	}
 }
 
-function countCacheControlBreakpoints(params: MessageCreateParamsStreaming): number {
+function countCacheControlBreakpoints(params: AnthropicSamplingParams): number {
 	let total = 0;
 	if (params.tools) {
 		for (const tool of params.tools as Array<Anthropic.Messages.Tool & CacheControlBlock>) {
@@ -1373,7 +1383,7 @@ function countCacheControlBreakpoints(params: MessageCreateParamsStreaming): num
 	return total;
 }
 
-function enforceCacheControlLimit(params: MessageCreateParamsStreaming, maxBreakpoints: number): void {
+function enforceCacheControlLimit(params: AnthropicSamplingParams, maxBreakpoints: number): void {
 	const total = countCacheControlBreakpoints(params);
 	if (total <= maxBreakpoints) return;
 	const excessCounter = { value: total - maxBreakpoints };
@@ -1408,7 +1418,7 @@ function buildParams(
 	context: Context,
 	isOAuthToken: boolean,
 	options?: AnthropicOptions,
-): MessageCreateParamsStreaming {
+): AnthropicSamplingParams {
 	const { cacheControl } = getCacheControl(baseUrl, options?.cacheRetention);
 	const params: AnthropicSamplingParams = {
 		model: model.id,
@@ -1445,7 +1455,9 @@ function buildParams(
 			options.effort ?? (requestedEffort ? mapEffortToAnthropicAdaptiveEffort(model, requestedEffort) : undefined);
 
 		if (mode === "anthropic-adaptive") {
-			params.thinking = { type: "adaptive" };
+			params.thinking = hasOpus47ApiRestrictions(model.id)
+				? { type: "adaptive", display: "summarized" }
+				: { type: "adaptive" };
 			if (effort) {
 				params.output_config = { effort };
 			}

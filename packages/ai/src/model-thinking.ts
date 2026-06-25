@@ -254,12 +254,42 @@ export function mapEffortToGoogleThinkingLevel<TApi extends Api>(
 	}
 }
 
+/** Anthropic adaptive effort values; the "xhigh" tier exists only for Opus 4.7+ on the first-party API. */
+export type AnthropicAdaptiveEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * Opus 4.7+ on the first-party Anthropic Messages API exposes a real 5-tier
+ * effort ladder (the "xhigh" tier). Other models and transports (Bedrock,
+ * Vertex) collapse to the legacy 4-tier map.
+ */
+function anthropicModelHasRealXHighEffort<TApi extends Api>(model: ApiModel<TApi>): boolean {
+	if (model.api !== "anthropic-messages") return false;
+	const parsedModel = parseKnownModel(model.id);
+	if (parsedModel.family !== "anthropic" || parsedModel.kind !== "opus") return false;
+	return semverGte(parsedModel.version, "4.7");
+}
+
 /** Maps a normalized thinking effort to Anthropic adaptive effort values. */
 export function mapEffortToAnthropicAdaptiveEffort<TApi extends Api>(
 	model: ApiModel<TApi>,
 	effort: Effort,
-): "low" | "medium" | "high" | "max" {
-	switch (requireSupportedEffort(model, effort)) {
+): AnthropicAdaptiveEffort {
+	const supported = requireSupportedEffort(model, effort);
+	if (anthropicModelHasRealXHighEffort(model)) {
+		switch (supported) {
+			case Effort.Minimal:
+				return "low";
+			case Effort.Low:
+				return "medium";
+			case Effort.Medium:
+				return "high";
+			case Effort.High:
+				return "xhigh";
+			case Effort.XHigh:
+				return "max";
+		}
+	}
+	switch (supported) {
 		case Effort.Minimal:
 		case Effort.Low:
 			return "low";
