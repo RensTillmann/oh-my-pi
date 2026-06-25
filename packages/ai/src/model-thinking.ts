@@ -290,6 +290,16 @@ export function disablesParallelToolUse(modelId: string): boolean {
 	return parsed.family === "anthropic" && parsed.kind === "opus" && semverEqual(parsed.version, "4.8");
 }
 
+/**
+ * Opus 4.8+ accepts `system`-role messages mid-conversation (not only as the
+ * leading system prompt). Callers may upgrade qualifying developer turns.
+ * @see https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages
+ */
+export function supportsMidConversationSystemMessages(modelId: string): boolean {
+	const parsed = parseKnownModel(modelId);
+	return parsed.family === "anthropic" && parsed.kind === "opus" && semverGte(parsed.version, "4.8");
+}
+
 function applyGeneratedModelPolicy(model: ApiModel<Api>): void {
 	const parsedModel = parseKnownModel(model.id);
 	if (parsedModel.family === "anthropic") {

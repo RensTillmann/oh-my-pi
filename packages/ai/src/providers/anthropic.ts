@@ -8,7 +8,7 @@ import type {
 	MessageParam,
 } from "@anthropic-ai/sdk/resources/messages";
 import { $env, abortableSleep, isEnoent } from "@oh-my-pi/pi-utils";
-import { disablesParallelToolUse, hasOpus47ApiRestrictions, mapEffortToAnthropicAdaptiveEffort } from "../model-thinking";
+import { disablesParallelToolUse, hasOpus47ApiRestrictions, mapEffortToAnthropicAdaptiveEffort, supportsMidConversationSystemMessages } from "../model-thinking";
 import { calculateCost } from "../models";
 import { getEnvApiKey, OUTPUT_FALLBACK_BUFFER } from "../stream";
 import type {
@@ -1412,7 +1412,7 @@ function buildParams(
 	const { cacheControl } = getCacheControl(baseUrl, options?.cacheRetention);
 	const params: AnthropicSamplingParams = {
 		model: model.id,
-		messages: convertAnthropicMessages(context.messages, model, isOAuthToken),
+		messages: convertAnthropicMessages(context.messages, model, isOAuthToken) as MessageParam[],
 		max_tokens: options?.maxTokens || (model.maxTokens / 3) | 0,
 		stream: true,
 	};
@@ -1511,12 +1511,15 @@ function buildParams(
 	return params;
 }
 
+export type AnthropicMessageParam = MessageParam | { role: "system"; content: MessageParam["content"] };
+
 export function convertAnthropicMessages(
 	messages: Message[],
 	model: Model<"anthropic-messages">,
 	isOAuthToken: boolean,
-): MessageParam[] {
-	const params: MessageParam[] = [];
+): AnthropicMessageParam[] {
+	const params: AnthropicMessageParam[] = [];
+	const developerParamIndices: number[] = [];
 
 	const transformedMessages = transformMessages(messages, model, normalizeToolCallId);
 
@@ -1524,10 +1527,12 @@ export function convertAnthropicMessages(
 		const msg = transformedMessages[i];
 
 		if (msg.role === "user" || msg.role === "developer") {
+			const isDeveloper = msg.role === "developer";
 			if (!msg.content) continue;
 
 			if (typeof msg.content === "string") {
 				if (msg.content.trim().length > 0) {
+					if (isDeveloper) developerParamIndices.push(params.length);
 					params.push({
 						role: "user",
 						content: msg.content.toWellFormed(),
@@ -1558,6 +1563,7 @@ export function convertAnthropicMessages(
 					return true;
 				});
 				if (filteredBlocks.length === 0) continue;
+				if (isDeveloper) developerParamIndices.push(params.length);
 				params.push({
 					role: "user",
 					content: filteredBlocks,
@@ -1676,6 +1682,21 @@ export function convertAnthropicMessages(
 				role: "user",
 				content: toolResults,
 			});
+		}
+	}
+
+	if (
+		developerParamIndices.length > 0 &&
+		isAnthropicApiBaseUrl(model.baseUrl) &&
+		supportsMidConversationSystemMessages(model.id)
+	) {
+		for (const idx of developerParamIndices) {
+			const followsUser = idx > 0 && params[idx - 1]?.role === "user";
+			const next = params[idx + 1];
+			const lastOrBeforeAssistant = idx === params.length - 1 || next?.role === "assistant";
+			if (followsUser && lastOrBeforeAssistant) {
+				params[idx] = { role: "system", content: params[idx].content };
+			}
 		}
 	}
 
