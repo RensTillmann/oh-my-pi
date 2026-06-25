@@ -272,6 +272,24 @@ export function mapEffortToAnthropicAdaptiveEffort<TApi extends Api>(
 	}
 }
 
+/**
+ * Opus 4.7+ rejects non-default sampling parameters (`temperature`, `top_p`,
+ * `top_k`) with HTTP 400. Callers must strip them before dispatch.
+ */
+export function hasOpus47ApiRestrictions(modelId: string): boolean {
+	const parsed = parseKnownModel(modelId);
+	return parsed.family === "anthropic" && parsed.kind === "opus" && semverGte(parsed.version, "4.7");
+}
+
+/**
+ * Claude Opus 4.8 must emit at most one tool call per turn; callers must set
+ * `tool_choice.disable_parallel_tool_use` on every non-`none` tool choice.
+ */
+export function disablesParallelToolUse(modelId: string): boolean {
+	const parsed = parseKnownModel(modelId);
+	return parsed.family === "anthropic" && parsed.kind === "opus" && semverEqual(parsed.version, "4.8");
+}
+
 function applyGeneratedModelPolicy(model: ApiModel<Api>): void {
 	const parsedModel = parseKnownModel(model.id);
 	if (parsedModel.family === "anthropic") {

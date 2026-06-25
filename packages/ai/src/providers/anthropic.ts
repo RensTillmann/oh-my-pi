@@ -8,7 +8,7 @@ import type {
 	MessageParam,
 } from "@anthropic-ai/sdk/resources/messages";
 import { $env, abortableSleep, isEnoent } from "@oh-my-pi/pi-utils";
-import { mapEffortToAnthropicAdaptiveEffort } from "../model-thinking";
+import { disablesParallelToolUse, hasOpus47ApiRestrictions, mapEffortToAnthropicAdaptiveEffort } from "../model-thinking";
 import { calculateCost } from "../models";
 import { getEnvApiKey, OUTPUT_FALLBACK_BUFFER } from "../stream";
 import type {
@@ -1427,6 +1427,13 @@ function buildParams(
 		params.top_k = options.topK;
 	}
 
+	// Opus 4.7+ rejects non-default sampling parameters with HTTP 400.
+	if (hasOpus47ApiRestrictions(model.id)) {
+		delete params.temperature;
+		delete params.top_p;
+		delete params.top_k;
+	}
+
 	if (context.tools) {
 		params.tools = convertTools(context.tools, isOAuthToken);
 	}
@@ -1468,6 +1475,16 @@ function buildParams(
 			};
 		} else {
 			params.tool_choice = options.toolChoice;
+		}
+	}
+
+	// Claude Opus 4.8 must emit at most one tool call per turn.
+	if (disablesParallelToolUse(model.id) && params.tools && params.tools.length > 0) {
+		const current = params.tool_choice;
+		if (!current) {
+			params.tool_choice = { type: "auto", disable_parallel_tool_use: true };
+		} else if (current.type !== "none") {
+			params.tool_choice = { ...current, disable_parallel_tool_use: true };
 		}
 	}
 

@@ -3,6 +3,7 @@
 // Copilot model premium request multipliers by model identifier.
 const COPILOT_PREMIUM_MULTIPLIERS: Record<string, number> = {
 	"github-copilot/claude-haiku-4.5": 0.33,
+	"github-copilot/claude-opus-4.8": 3,
 	"github-copilot/claude-opus-4.7": 3,
 	"github-copilot/claude-opus-4.6": 3,
 	"github-copilot/gpt-4o": 0,
